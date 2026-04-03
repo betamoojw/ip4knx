@@ -19,13 +19,13 @@ namespace TPUart
         TaskHandle_t _taskHandle = nullptr;
         std::function<void(void)> _callback;
 
-        ESP32::ESP32(int rx, int tx, uart_port_t uart) : _rx(rx), _tx(tx), _uart(uart) {}
-        ESP32::~ESP32() { end(); }
+        ESP32Interface::ESP32Interface(int rx, int tx, uart_port_t uart) : _rx(rx), _tx(tx), _uart(uart) {}
+        ESP32Interface::~ESP32Interface() { end(); }
 
-        void ESP32::runTask(void *interface)
+        void ESP32Interface::runTask(void *interface)
         {
             uart_event_t event;
-            ESP32 *_interface = (ESP32 *)interface;
+            ESP32Interface *_interface = (ESP32Interface *)interface;
             while (true)
             {
                 if (xQueueReceive(_interface->_taskQueue, (void *)&event, portMAX_DELAY))
@@ -53,7 +53,7 @@ namespace TPUart
             }
         }
 
-        void ESP32::begin(int baud)
+        void ESP32Interface::begin(int baud)
         {
             if (_running) end();
             uart_config_t uart_config = {
@@ -62,7 +62,7 @@ namespace TPUart
                 .parity = UART_PARITY_EVEN,
                 .stop_bits = UART_STOP_BITS_1,
                 .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-                .source_clk = UART_SCLK_DEFAULT,
+                .source_clk = UART_SCLK_XTAL,
             };
 
             // UART-Konfiguration anwenden
@@ -72,13 +72,13 @@ namespace TPUart
             uart_set_rx_full_threshold(_uart, 1);
             _running = true;
 
-            if (_uart == UART_NUM_1) xTaskCreate(&ESP32::runTask, "uart_task1", TPUART_ESP32_TASK_STACK_SIZE, this, configMAX_PRIORITIES / 5 * 4, &_taskHandle);
+            if (_uart == UART_NUM_1) xTaskCreate(&ESP32Interface::runTask, "uart_task1", TPUART_ESP32_TASK_STACK_SIZE, this, configMAX_PRIORITIES / 5 * 4, &_taskHandle);
           #if SOC_UART_HP_NUM > 2 // UART2 exists
-            if (_uart == UART_NUM_2) xTaskCreate(&ESP32::runTask, "uart_task2", TPUART_ESP32_TASK_STACK_SIZE, this, configMAX_PRIORITIES / 5 * 4, &_taskHandle);
+            if (_uart == UART_NUM_2) xTaskCreate(&ESP32Interface::runTask, "uart_task2", TPUART_ESP32_TASK_STACK_SIZE, this, configMAX_PRIORITIES / 5 * 4, &_taskHandle);
           #endif
         }
 
-        void ESP32::end()
+        void ESP32Interface::end()
         {
             if (!_running) return;
             _running = false;
@@ -91,7 +91,7 @@ namespace TPUart
             }
         }
 
-        bool ESP32::available()
+        bool ESP32Interface::available()
         {
             if (!_running) return false;
             size_t len = 0;
@@ -99,7 +99,7 @@ namespace TPUart
             return len > 0;
         }
 
-        bool ESP32::availableForWrite()
+        bool ESP32Interface::availableForWrite()
         {
             if (!_running) return false;
             size_t len = 0;
@@ -107,7 +107,7 @@ namespace TPUart
             return len > 0;
         }
 
-        bool ESP32::write(char value)
+        bool ESP32Interface::write(char value)
         {
             if (!_running) return false;
             // uart_wait_tx_done(_uart, pdMS_TO_TICKS(2));
@@ -115,14 +115,14 @@ namespace TPUart
             return true;
         }
 
-        int ESP32::read()
+        int ESP32Interface::read()
         {
             if (!available()) return -1;
             char c;
             return uart_read_bytes(_uart, (uint8_t *)&c, 1, pdMS_TO_TICKS(1)) == 1 ? c : -1;
         }
 
-        bool ESP32::overflow()
+        bool ESP32Interface::overflow()
         {
             if (_overflow)
             {
@@ -132,19 +132,19 @@ namespace TPUart
             return false;
         };
 
-        void ESP32::flush()
+        void ESP32Interface::flush()
         {
             if (!_running) return;
 
             uart_flush(_uart);
         }
 
-        bool ESP32::hasCallback()
+        bool ESP32Interface::hasCallback()
         {
             return true;
         }
 
-        void ESP32::registerCallback(std::function<bool()> callback)
+        void ESP32Interface::registerCallback(std::function<bool()> callback)
         {
             _callback = callback;
         }
