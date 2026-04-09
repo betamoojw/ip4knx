@@ -2,12 +2,11 @@
 
 void ImprovWiFi::handleSerial()
 {
-
-  if (serial->available() > 0)
+  while (serial->available() > 0)
   {
     uint8_t b = serial->read();
 
-    if (parseImprovSerial(_position, b, _buffer))
+    if (_position < sizeof(_buffer) && parseImprovSerial(_position, b, _buffer))
     {
       _buffer[_position++] = b;
     }
@@ -25,7 +24,7 @@ bool ImprovWiFi::handleBuffer(uint8_t *buffer, uint16_t bytes) {
 	for (uint16_t i = 0; i < bytes; i++) {
 	    uint8_t b = buffer[i];
 	    
-	    if (parseImprovSerial(_position, b, _buffer)) {
+	    if (_position < sizeof(_buffer) && parseImprovSerial(_position, b, _buffer)) {
 		_buffer[_position++] = b;
 		res = true;
 	    } else {
@@ -61,14 +60,25 @@ bool ImprovWiFi::onCommandCallback(ImprovTypes::ImprovCommand cmd)
     {
       setState(ImprovTypes::State::STATE_AUTHORIZED);
     }
-
     break;
   }
 
   case ImprovTypes::Command::WIFI_SETTINGS:
   {
 
-    if (cmd.ssid.empty())
+    if (cmd.ssid.empty() || cmd.ssid.length() > 32)
+    {
+      setError(ImprovTypes::Error::ERROR_INVALID_RPC);
+      break;
+    }
+
+    // Password validation: empty for open networks, 8-63 chars for WPA/WPA2
+    if (cmd.password.length() > 0 && cmd.password.length() < 8)
+    {
+      setError(ImprovTypes::Error::ERROR_INVALID_RPC);
+      break;
+    }
+    if (cmd.password.length() > 63)
     {
       setError(ImprovTypes::Error::ERROR_INVALID_RPC);
       break;
@@ -129,6 +139,14 @@ bool ImprovWiFi::onCommandCallback(ImprovTypes::ImprovCommand cmd)
     break;
   }
 
+  case ImprovTypes::Command::IDENTIFY:
+  {
+    // Identify command - optional, just acknowledge
+    // ESP WebFlasher may send this during initialization
+    setError(ImprovTypes::Error::ERROR_NONE);
+    break;
+  }
+
   default:
   {
     setError(ImprovTypes::ERROR_UNKNOWN_RPC);
@@ -166,16 +184,18 @@ void ImprovWiFi::sendDeviceUrl(ImprovTypes::Command cmd)
   sprintf(buffer, "%d.%d.%d.%d", address[0], address[1], address[2], address[3]);
   std::string ipStr = std::string{buffer};
 
-  if (improvWiFiParams.deviceUrl.empty())
+  std::string urlToSend = improvWiFiParams.deviceUrl;
+
+  if (urlToSend.empty())
   {
-    improvWiFiParams.deviceUrl = "http://" + ipStr;
+    urlToSend = "http://" + ipStr;
   }
   else
   {
-    replaceAll(improvWiFiParams.deviceUrl, "{LOCAL_IPV4}", ipStr);
+    replaceAll(urlToSend, "{LOCAL_IPV4}", ipStr);
   }
 
-  std::vector<uint8_t> data = build_rpc_response(cmd, {improvWiFiParams.deviceUrl}, false);
+  std::vector<uint8_t> data = build_rpc_response(cmd, {urlToSend}, false);
   sendResponse(data);
 }
 
@@ -227,7 +247,7 @@ void ImprovWiFi::getAvailableWifiNetworks()
   if (networkNum==0)
       networkNum = WiFi.scanNetworks(false, false); 
 
-  if (networkNum) {
+  if (networkNum > 0) {
       int indices[networkNum];
       
       // Sort RSSI - strongest first
@@ -245,29 +265,52 @@ void ImprovWiFi::getAvailableWifiNetworks()
           if (-1 == indices[i]) { continue; }
           String cssid = WiFi.SSID(indices[i]);
           for (uint32_t j = i + 1; j < networkNum; j++) {
-	      if (cssid == WiFi.SSID(indices[j])) {
+	      if (indices[j] != -1 && cssid == WiFi.SSID(indices[j])) {
 		  indices[j] = -1; // Set dup aps to index -1
 	      }
           }
       }
       
   
-      // Send networks
+      // Send each network as SEPARATE packet (ESP WebFlasher expects this!)
+      // See: https://github.com/esphome/esp-web-tools and Improv Serial spec
       for (uint32_t i = 0; i < networkNum; i++) {
           if (-1 == indices[i]) { continue; }                  // Skip dups
           String ssid_copy = WiFi.SSID(indices[i]);
           if (!ssid_copy.length()) { ssid_copy = F("no_name"); }
 
-	  std::vector<std::string> wifinetworks = { ssid_copy.c_str(), std::to_string(WiFi.RSSI(indices[i])), ( WiFi.encryptionType(indices[i]) == WIFI_OPEN ? "NO" : "YES") };
-	  std::vector<uint8_t> data = build_rpc_response( ImprovTypes::GET_WIFI_NETWORKS, wifinetworks, false);
-	  sendResponse(data);
-	  delay(1);
+          // Each network sent as individual RPC response: {SSID, RSSI, AUTH}
+          std::vector<std::string> networkData;
+          networkData.push_back(ssid_copy.c_str());
+          networkData.push_back(std::to_string(WiFi.RSSI(indices[i])));
+          // Use YES/NO format expected by ESP WebTools (not WPA/WPA2/etc)
+          uint8_t encType = WiFi.encryptionType(indices[i]);
+          bool hasAuth = (encType != WIFI_AUTH_OPEN);
+          networkData.push_back(hasAuth ? "YES" : "NO");
+
+          std::vector<uint8_t> data = build_rpc_response(ImprovTypes::GET_WIFI_NETWORKS, networkData, false);
+          sendResponse(data);
+          delay(10); // Small delay between packets
       }
   }
 
   // final response
-  std::vector<uint8_t> data =  build_rpc_response(ImprovTypes::GET_WIFI_NETWORKS, std::vector<std::string>{}, false);
-  sendResponse(data);
+  std::vector<uint8_t> endData = build_rpc_response(ImprovTypes::GET_WIFI_NETWORKS, std::vector<std::string>{}, false);
+  sendResponse(endData);
+}
+
+std::string ImprovWiFi::getSecurityTypeString(uint8_t encryptionType)
+{
+  switch (encryptionType) {
+      case WIFI_AUTH_OPEN: return "OPEN";
+      case WIFI_AUTH_WEP: return "WEP";
+      case WIFI_AUTH_WPA_PSK: return "WPA";
+      case WIFI_AUTH_WPA2_PSK: return "WPA2";
+      case WIFI_AUTH_WPA_WPA2_PSK: return "WPA_WPA2";
+      case WIFI_AUTH_WPA3_PSK: return "WPA3";
+      case WIFI_AUTH_WPA2_WPA3_PSK: return "WPA2_WPA3";
+      default: return "UNKNOWN";
+  }
 }
 
 inline void ImprovWiFi::replaceAll(std::string &str, const std::string &from, const std::string &to)
@@ -324,9 +367,10 @@ bool ImprovWiFi::parseImprovSerial(size_t position, uint8_t byte, const uint8_t 
     
     if (type == ImprovTypes::ImprovSerialType::TYPE_RPC)
     {
-      _position = 0;
       auto command = parseImprovData(&buffer[9], data_len, false);
-      return onCommandCallback(command);
+      onCommandCallback(command);
+      _position = 0;
+      return false;  // Return false so handleSerial doesn't increment _position
     }
   }
 
@@ -344,7 +388,7 @@ ImprovTypes::ImprovCommand ImprovWiFi::parseImprovData(const uint8_t *data, size
   ImprovTypes::Command command = (ImprovTypes::Command)data[0];
   uint8_t data_length = data[1];
 
-  if (data_length != length - 2 - check_checksum)
+  if (data_length != length - 2 - (check_checksum ? 1 : 0))
   {
     improv_command.command = ImprovTypes::Command::UNKNOWN;
     return improv_command;
@@ -401,7 +445,11 @@ void ImprovWiFi::setState(ImprovTypes::State state)
     checksum += d;
   data[10] = checksum;
 
+  // Send \n before packet so ESP Web Tools parser resets its buffer.
+  // The browser parser discards non-IMPROV bytes but uses \n as sync point.
+  serial->write('\n');
   serial->write(data.data(), data.size());
+  serial->write('\n');
 }
 
 void ImprovWiFi::setError(ImprovTypes::Error error)
@@ -418,7 +466,9 @@ void ImprovWiFi::setError(ImprovTypes::Error error)
     checksum += d;
   data[10] = checksum;
 
+  serial->write('\n');
   serial->write(data.data(), data.size());
+  serial->write('\n');
 }
 
 void ImprovWiFi::sendResponse(std::vector<uint8_t> &response)
@@ -435,7 +485,9 @@ void ImprovWiFi::sendResponse(std::vector<uint8_t> &response)
     checksum += d;
   data.push_back(checksum);
 
+  serial->write('\n');
   serial->write(data.data(), data.size());
+  serial->write('\n');
 }
 
 std::vector<uint8_t> ImprovWiFi::build_rpc_response(ImprovTypes::Command command, const std::vector<std::string> &datum, bool add_checksum)
