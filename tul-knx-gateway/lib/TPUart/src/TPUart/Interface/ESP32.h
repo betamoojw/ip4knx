@@ -2,12 +2,17 @@
 #ifdef ARDUINO_ARCH_ESP32
 #include "TPUart/Interface/Abstract.h"
 #include <Arduino.h>
+#include "driver/uart.h"
+
+#ifdef ESP32
+#undef ESP32
+#endif
 
 namespace TPUart
 {
     namespace Interface
     {
-        class ESP32 : public Abstract
+        class ESP32Interface : public Abstract
         {
           private:
             int _rx, _tx;
@@ -19,8 +24,8 @@ namespace TPUart
             std::function<bool(void)> _callback;
 
           public:
-            ESP32(int rx, int tx, uart_port_t uart);
-            ~ESP32();
+            ESP32Interface(int rx, int tx, uart_port_t uart);
+            ~ESP32Interface();
 
             static void runTask(void *interface);
 

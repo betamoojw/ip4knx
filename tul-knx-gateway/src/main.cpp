@@ -1,4 +1,5 @@
-#include <Network.h>
+// #include <Network.h>
+#include "dependencies/network/Network.h"
 #include <Arduino.h>
 #include <WiFi.h>
 #include "version.h"
@@ -6,7 +7,7 @@
 #include "ImprovWiFiLibrary.h"
 #include "nvs_flash.h"
 
-#include <ESPAsyncWebServer.h>
+#include <WebServer.h>
 #include <ESPmDNS.h>
 #include "index_html.h"
 #include <knx/bau091A.h>
@@ -14,7 +15,10 @@
 
 #include <TPUart/Interface/ESP32.h>
 
-AsyncWebServer server(80);
+// Work around ESP32 macro conflict
+using ESP32Interface = TPUart::Interface::ESP32Interface;
+
+WebServer server(80);
 ImprovWiFi improvSerial(&Serial);
 bool improvConnected = false;
 
@@ -147,7 +151,7 @@ void setup() {
     
     // Setup KNX Hardware Interface for TUL/TUL32
     // using UART_NUM_1 to leave UART_NUM_0 alone if needed
-    auto knxInterface = new TPUart::Interface::ESP32(KNX_RX_PIN, KNX_TX_PIN, UART_NUM_1);
+    auto knxInterface = new ESP32Interface(KNX_RX_PIN, KNX_TX_PIN, 1); // UART_NUM_1
     knx.platform().interface(knxInterface);
     
     knx.ledPin(KNX_LED);
@@ -165,11 +169,11 @@ void setup() {
     knx.start();
     Serial.printf("KNX Gateway running! (Build %lu, Git %s)\n", (unsigned long)BUILD_NUMBER, BUILD_GIT);
 
-    server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
-        request->send_P(200, "text/html", index_html);
+    server.on("/", HTTP_GET, [](){
+        server.send_P(200, "text/html", index_html);
     });
 
-    server.on("/api/status", HTTP_GET, [](AsyncWebServerRequest *request){
+    server.on("/api/status", HTTP_GET, [](){
         String json = "{";
         
         // uptime
@@ -237,7 +241,7 @@ void setup() {
         json += "}";
 
         json += "}";
-        request->send(200, "application/json", json);
+        server.send(200, "application/json", json);
     });
 
     server.begin();
@@ -255,6 +259,7 @@ bool wasConnected = true;
 
 void loop() {
     knx.loop();
+    server.handleClient();
     
     // ImprovSerial always active - allows re-configuration at any time
     // via ESP WebFlasher or CLI. USB-JTAG does not reset on port open,
