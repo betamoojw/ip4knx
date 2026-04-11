@@ -2,8 +2,10 @@
 #include "dependencies/network/Network.h"
 #include <Arduino.h>
 #include <WiFi.h>
+#include "version.h"
 #include <knx.h>
 #include "ImprovWiFiLibrary.h"
+#include "nvs_flash.h"
 
 #include <WebServer.h>
 #include <ESPmDNS.h>
@@ -55,49 +57,95 @@ uint32_t bootTime = 0;
 
 void setup() {
     Serial.begin(115200);
-    delay(2000);
-    Serial.println("Starting TUL KNX/IP Gateway");
-    
-    ArduinoPlatform::SerialDebug = &Serial;
-    
-    pinMode(KNX_LED, OUTPUT);
-    digitalWrite(KNX_LED, HIGH); // Active low
 
-    // Setup Improv callbacks
+    // Setup Improv IMMEDIATELY - ESP Web Tools has only ~2s to detect it
+    // after opening the serial port (which resets the device via USB-JTAG)
     improvSerial.onImprovConnected(onImprovWiFiConnectedCb);
     improvSerial.onImprovError(onImprovWiFiErrorCb);
 #if defined(CONFIG_IDF_TARGET_ESP32C3)
-    improvSerial.setDeviceInfo(ImprovTypes::ChipFamily::CF_ESP32_C3, "TUL KNX/IP Gateway", "1.0.0", "TUL Gateway");
+    improvSerial.setDeviceInfo(ImprovTypes::ChipFamily::CF_ESP32_C3, "TUL KNX/IP Gateway", FIRMWARE_VERSION, "TUL Gateway");
 #elif defined(CONFIG_IDF_TARGET_ESP32C6)
-    // Improv currently uses CF_ESP32 for generic fallback if C6 isn't present
-    improvSerial.setDeviceInfo(ImprovTypes::ChipFamily::CF_ESP32, "TUL32 KNX/IP Gateway", "1.0.0", "TUL32 Gateway");
+    improvSerial.setDeviceInfo(ImprovTypes::ChipFamily::CF_ESP32_C6, "TUL32 KNX/IP Gateway", FIRMWARE_VERSION, "TUL32 Gateway");
 #else
-    improvSerial.setDeviceInfo(ImprovTypes::ChipFamily::CF_ESP32, "TUL KNX/IP Gateway", "1.0.0", "TUL Gateway");
+    improvSerial.setDeviceInfo(ImprovTypes::ChipFamily::CF_ESP32, "TUL KNX/IP Gateway", FIRMWARE_VERSION, "TUL Gateway");
 #endif
-    
-    // First, try standard WiFi begin (if already configured)
-    WiFi.begin();
-    int wifiWait = 0;
-    while (WiFi.status() != WL_CONNECTED && wifiWait < 10) {
-        delay(500);
+
+    // Handle Improv during early boot - ESP Web Tools sends commands ~2s after port open
+    for (int i = 0; i < 200; i++) {
         improvSerial.handleSerial();
-        wifiWait++;
+        delay(10);
     }
 
-    if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("Waiting for Improv WiFi provisioning via Serial...");
-        while (WiFi.status() != WL_CONNECTED) {
+    Serial.println("Starting TUL KNX/IP Gateway");
+    ArduinoPlatform::SerialDebug = &Serial;
+
+    pinMode(KNX_LED, OUTPUT);
+    digitalWrite(KNX_LED, HIGH); // Active low
+
+    // Initialize NVS - required for WiFi and Improv
+    esp_err_t err = nvs_flash_init();
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        Serial.println("NVS: erasing and re-initializing...");
+        nvs_flash_erase();
+        nvs_flash_init();
+    }
+    Serial.print("NVS init: ");
+    Serial.println(err == ESP_OK ? "OK" : "FAILED");
+
+    bootTime = millis();
+
+    // Enable WiFi STA mode to read stored credentials
+    WiFi.mode(WIFI_STA);
+    WiFi.disconnect(); // Clear any stale connection state
+
+    // Check for stored credentials
+    bool hasCredentials = WiFi.psk().length() > 0 || WiFi.SSID().length() > 0;
+    Serial.print("WiFi SSID length: ");
+    Serial.println(WiFi.SSID().length());
+    Serial.print("WiFi PSK length: ");
+    Serial.println(WiFi.psk().length());
+
+    // Wait for WiFi connection ONLY within the 120s Improv window
+    // This allows re-configuration even if credentials are stored
+    const uint32_t improvWindowMs = 120000;  // 120 seconds
+
+    if (hasCredentials) {
+        Serial.println("WiFi credentials found, attempting auto-reconnect...");
+        WiFi.begin();
+
+        // Wait for connection, but keep Improv active and respect 120s window
+        while (WiFi.status() != WL_CONNECTED && (millis() - bootTime < improvWindowMs)) {
             improvSerial.handleSerial();
             delay(10);
         }
     } else {
-        Serial.println("WiFi auto-reconnected.");
-        Serial.print("IP Address: ");
-        Serial.println(WiFi.localIP());
+        Serial.println("No WiFi credentials stored.");
     }
 
-    digitalWrite(KNX_LED, LOW); // Connected
-    bootTime = millis();
+    // If not connected after initial attempt, wait for Improv provisioning
+    // for the remainder of the 120s window
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("Waiting for Improv WiFi provisioning...");
+
+        while (WiFi.status() != WL_CONNECTED && (millis() - bootTime < improvWindowMs)) {
+            improvSerial.handleSerial();
+            delay(10);
+        }
+
+        if (improvConnected) {
+            Serial.println("[Info] WiFi configured via Improv");
+        }
+    }
+
+    if (WiFi.status() == WL_CONNECTED) {
+        Serial.println("WiFi connected!");
+        Serial.print("IP Address: ");
+        Serial.println(WiFi.localIP());
+        digitalWrite(KNX_LED, LOW); // LED ON (Active Low)
+    } else {
+        Serial.println("[Warning] WiFi not connected - system will continue");
+        digitalWrite(KNX_LED, LOW); // LED ON anyway
+    }
 
     // === KNX Setup ===
     
@@ -119,7 +167,7 @@ void setup() {
     }
 
     knx.start();
-    Serial.println("KNX Gateway running!");
+    Serial.printf("KNX Gateway running! (Build %lu, Git %s)\n", (unsigned long)BUILD_NUMBER, BUILD_GIT);
 
     server.on("/", HTTP_GET, [](){
         server.send_P(200, "text/html", index_html);
@@ -175,7 +223,23 @@ void setup() {
             json += "\"tx_frames\":0,";
             json += "\"bus_load\":0";
         }
-        
+
+        // Build info
+        json += ",\"build\":{";
+        json += "\"version\":\"" + String(FIRMWARE_VERSION) + "\",";
+        json += "\"number\":" + String(BUILD_NUMBER) + ",";
+        json += "\"git\":\"" + String(BUILD_GIT) + "\"";
+        json += "},";
+
+        // Hardware info
+        json += "\"hardware\":{";
+        json += "\"chip_model\":\"" + String(ESP.getChipModel()) + "\",";
+        json += "\"chip_rev\":" + String(ESP.getChipRevision()) + ",";
+        json += "\"cpu_freq\":" + String(ESP.getCpuFreqMHz()) + ",";
+        json += "\"heap_total\":" + String(ESP.getHeapSize()) + ",";
+        json += "\"heap_free\":" + String(ESP.getFreeHeap());
+        json += "}";
+
         json += "}";
         server.send(200, "application/json", json);
     });
@@ -197,10 +261,10 @@ void loop() {
     knx.loop();
     server.handleClient();
     
-    // Keep ImprovSerial active for 120s after boot, even if connected.
-    if (millis() - bootTime < 120000) {
-        improvSerial.handleSerial();
-    }
+    // ImprovSerial always active - allows re-configuration at any time
+    // via ESP WebFlasher or CLI. USB-JTAG does not reset on port open,
+    // so a time-limited window would expire before the user connects.
+    improvSerial.handleSerial();
 
     // Monitor WiFi Connection
     if (millis() - lastWifiCheck > 5000) {
