@@ -98,6 +98,17 @@ namespace TPUart
         volatile unsigned long _regReadSentAt = 0;
         volatile unsigned long _regReadAt = 0;
         volatile unsigned int _regReadTimeouts = 0;
+        // Line-error count captured when a read was armed, and how many readings
+        // were thrown away because that count had moved by the time the answer
+        // arrived.
+        volatile unsigned int _regReadErrSnapshot = 0;
+        volatile unsigned int _regReadDropped = 0;
+        // Answered reads. Measured on both chip families: every register answer
+        // raises the parity counter by exactly one, because it is a bare data
+        // byte and the device does not send it with the parity this side is
+        // configured for. Those events are ours, not line noise, so they are
+        // booked here and subtracted from what gets reported as "unexpected".
+        volatile unsigned int _regReadAnswers = 0;
         // When the host last sent something the device will answer unprompted.
         volatile unsigned long _lastHostRequestAt = 0;
 
@@ -200,6 +211,25 @@ namespace TPUart
         // unmarked, so it is only issued while nothing else is in flight; poll
         // internalRegisterValid() afterwards.
         bool requestInternalRegister(uint8_t readRequestByte);
+        // Line-integrity counters from the UART driver. A rising parity count
+        // means bytes reached the stack that the hardware already knew were
+        // damaged — relevant for anything that trusts a single byte, above all
+        // the register readback.
+        unsigned int uartParityErrors() { return _interface ? _interface->parityErrors() : 0; }
+        unsigned int uartFrameErrors() { return _interface ? _interface->frameErrors() : 0; }
+        unsigned int uartLineErrors() { return uartParityErrors() + uartFrameErrors(); }
+        // Line errors beyond the one each register answer produces by itself.
+        // This is the number that says something about the link.
+        unsigned int uartUnexpectedLineErrors()
+        {
+            const unsigned int total = uartLineErrors();
+            const unsigned int expected = _regReadAnswers;
+            return total > expected ? total - expected : 0;
+        }
+        // Readings discarded because the line reported an error while they were
+        // in flight. Stays at zero on a healthy link.
+        unsigned int internalRegisterDropped() const { return _regReadDropped; }
+
         bool internalRegisterPending() const { return _regReadPending; }
         bool internalRegisterValid() const { return _regReadValid; }
         uint8_t internalRegisterRequest() const { return _regReadRequest; }

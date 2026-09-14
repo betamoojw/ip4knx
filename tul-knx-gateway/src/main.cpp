@@ -833,8 +833,8 @@ static bool serviceProgButton() {
     // RXD0 is quiet this never prints.
     if (rejected > 0 && millis() - reportAt > 60000) {
         reportAt = millis();
-        Serial.printf("Button: %lu unstable edges on GPIO9 in the last minute (ignored)\n",
-                      (unsigned long)rejected);
+        Serial.printf("Button: %lu unstable edges on GPIO%d in the last minute (ignored)\n",
+                      (unsigned long)rejected, KNX_BUTTON);
         rejected = 0;
     }
 
@@ -1103,6 +1103,12 @@ void setup() {
             Serial.printf("State: %s\n", tp.getBcuStateInfo());
             if (tp.isConnected()) {
                 Serial.printf("Baud : %u  Mode: %s\n", tp.getBaudrate(), sys.modeString());
+                // Printed before the ACR0 read below, so this is the count from
+                // the handshake alone. Expect zero here: the one parity event
+                // per boot that used to look mysterious is the boot read itself,
+                // which has not happened yet at this point.
+                Serial.printf("Line : parity errors %u, frame errors %u after handshake\n",
+                              tp.uartParityErrors(), tp.uartFrameErrors());
                 Serial.printf("Rails: V20V%c VDD2%c VBUS%c VFILT%c XTAL%c TW%c\n",
                               sys.v20v()  ? '+' : '-',
                               sys.vdd2()  ? '+' : '-',
@@ -1581,6 +1587,10 @@ void setup() {
             json += "\"thermal_warning\":" + String(sys.thermalWarning() ? "true" : "false") + ",";
             json += "\"self_test\":\"" + String(ncnSelfTestText(ncnSelfTest)) + "\",";
             json += "\"rx_discarded\":" + String(stats.getRxDiscardedBytes()) + ",";
+            json += "\"uart_parity_err\":" + String(tp.uartParityErrors()) + ",";
+            json += "\"uart_frame_err\":" + String(tp.uartFrameErrors()) + ",";
+            json += "\"uart_line_err_unexpected\":" + String(tp.uartUnexpectedLineErrors()) + ",";
+            json += "\"acr0_dropped\":" + String(tp.internalRegisterDropped()) + ",";
             json += "\"acr0\":" + acr0StatusJson(tp.internalRegisterTimeouts());
             json += "}";
         } else {
@@ -1595,6 +1605,10 @@ void setup() {
                     "\"xtal\":false,\"thermal_warning\":false,";
             json += "\"self_test\":\"" + String(ncnSelfTestText(ncnSelfTest)) + "\",";
             json += "\"rx_discarded\":0,";
+            json += "\"uart_parity_err\":0,";
+            json += "\"uart_frame_err\":0,";
+            json += "\"uart_line_err_unexpected\":0,";
+            json += "\"acr0_dropped\":0,";
             json += "\"acr0\":" + acr0StatusJson(0) + "}";
         }
 
@@ -1869,6 +1883,34 @@ void loop() {
             now = !tp.isConnected()               ? NCN_ST_NO_UART
                 : sys.vbus()                      ? NCN_ST_OK
                                                   : NCN_ST_OK_NO_VBUS;
+
+            // Report line-integrity events when they move. Silence is the normal
+            // case, so a single line is worth more than a periodic zero.
+            // Report only what is not self-inflicted: each register answer raises
+            // the parity count by one on its own, so the raw counter would
+            // announce our own diagnostics as if the link were degrading.
+            static unsigned int lastUnexpected = 0;
+            const unsigned int unexpected = tp.uartUnexpectedLineErrors();
+            if (unexpected != lastUnexpected) {
+                Serial.printf("NCN UART line errors (unexpected): %u (+%d) "
+                              "[raw parity %u, frame %u]\n",
+                              unexpected, (int)(unexpected - lastUnexpected),
+                              tp.uartParityErrors(), tp.uartFrameErrors());
+                lastUnexpected = unexpected;
+            }
+            // Discards are reported, not re-driven: a fault sequence retries on
+            // its own through the bounded path below, and re-requesting here
+            // would loop for as long as the line keeps erroring — one read and
+            // one log line per second, forever. Damped for the same reason.
+            static unsigned int lastDropped = 0, loggedDrops = 0;
+            const unsigned int dropped = tp.internalRegisterDropped();
+            if (dropped != lastDropped) {
+                if (loggedDrops < 3 || (dropped % 60) == 0) {
+                    Serial.printf("ACR0 reading discarded (line error in flight), total %u\n", dropped);
+                    loggedDrops++;
+                }
+                lastDropped = dropped;
+            }
 
             // --- ACR0 readback, see the globals for why ---------------------
             // Arm on the falling edge of VDD2. Per DS p.23 a VFILT brown-out

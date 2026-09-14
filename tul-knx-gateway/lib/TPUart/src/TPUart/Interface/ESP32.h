@@ -14,6 +14,8 @@ namespace TPUart
             uart_port_t _uart;
             bool _dma = false;
             volatile bool _overflow = false;
+            volatile unsigned int _parityErrors = 0;
+            volatile unsigned int _frameErrors = 0;
             QueueHandle_t _taskQueue = nullptr;
             TaskHandle_t _taskHandle = nullptr;
             std::function<bool(void)> _callback;
@@ -31,6 +33,8 @@ namespace TPUart
             bool write(char value) override;
             int read() override;
             bool overflow() override;
+            unsigned int parityErrors() override;
+            unsigned int frameErrors() override;
             void flush() override;
             bool hasCallback() override;
             void registerCallback(std::function<bool()> callback) override;

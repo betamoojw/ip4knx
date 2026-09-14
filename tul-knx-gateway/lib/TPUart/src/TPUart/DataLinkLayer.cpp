@@ -743,6 +743,15 @@ namespace TPUart
         _regReadValid = false;
         _regReadRequest = readRequestByte;
         _regReadSentAt = millis();
+        // Remember the line-error count: if it has moved by the time the answer
+        // shows up, a byte on this line was damaged while our read was in
+        // flight, and the answer cannot be trusted.
+        _regReadErrSnapshot = uartLineErrors();
+#ifdef NCN_REGREAD_LINEERR_TEST
+        // Bench only: pretend an error happened, so every answer must be
+        // discarded. Proves the discard path actually runs.
+        _regReadErrSnapshot--;
+#endif
         // Armed before the write, never after: the answer can be back before
         // the next statement runs.
         _regReadPending = true;
@@ -825,6 +834,26 @@ namespace TPUart
         // does not.
         if ((uint8_t)value == U_RESET_IND) return false;
 
+        // One line error per read is expected and is not noise: measured on both
+        // chip families, every register answer raises the parity count by
+        // exactly one, because the answer is a bare data byte that the device
+        // does not send with the parity configured on this side. Whether that
+        // event is queued before or after the byte varies, so the count seen
+        // here is either +0 or +1 on a healthy link.
+        //
+        // Anything beyond that means a second, unexplained damaged byte while
+        // this read was in flight. The counter does not say which byte was hit,
+        // so the answer could be one flipped bit from the truth with no way to
+        // tell — drop it and let the decoder see the byte. A missed reading is
+        // retried; a silently wrong one is not.
+        if (uartLineErrors() - _regReadErrSnapshot > 1)
+        {
+            _regReadPending = false;
+            _regReadDropped++;
+            return false;
+        }
+
+        _regReadAnswers++;
         _regReadValue = (uint8_t)value;
         _regReadAt = millis();
         _regReadValid = true;

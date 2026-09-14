@@ -44,6 +44,19 @@ namespace TPUart
                             _interface->_overflow = true;
                             break;
 
+                        // Counted, not swallowed. The driver detects these but
+                        // still delivers the byte, so without a count there is
+                        // no way to tell a corrupted byte from a good one after
+                        // the fact — which matters most for the register
+                        // readback, whose answer carries no marker of its own.
+                        case UART_PARITY_ERR:
+                            _interface->_parityErrors++;
+                            break;
+
+                        case UART_FRAME_ERR:
+                            _interface->_frameErrors++;
+                            break;
+
                         default:
 
                             break;
@@ -148,6 +161,16 @@ namespace TPUart
             if (!_running) return;
 
             uart_flush(_uart);
+        }
+
+        unsigned int ESP32::parityErrors()
+        {
+            return _parityErrors;
+        }
+
+        unsigned int ESP32::frameErrors()
+        {
+            return _frameErrors;
         }
 
         bool ESP32::hasCallback()
