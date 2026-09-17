@@ -16,13 +16,19 @@
 // Mesg Code and additional info length
 #define CEMI_HEADER_SIZE 2
 
+// Largest APDU octet count the internal buffer can carry: the built LPDU occupies
+// octetCount + 10 bytes (8 header + length octet + TPCI octet), and buffer is
+// 0xff + APDU_LPDU_DIFF = 264, so 264 - 10 = 254. That is also PID_MAX_APDU_LENGTH;
+// 255 is the reserved escape and valid() drops it anyway. (upstream e5b2903)
+#define MAX_APDU_OCTET_COUNT 254
+
 class CemiFrame
 {
     friend class DataLinkLayer;
 
   public:
     CemiFrame(uint8_t* data, uint16_t length);
-    CemiFrame(uint8_t apduLength);
+    CemiFrame(uint16_t apduLength); // uint16_t, not uint8_t: a uint8_t parameter wrapped every apduLength > 255 silently
     CemiFrame(const CemiFrame& other);
     CemiFrame& operator=(CemiFrame other);
 
@@ -72,6 +78,10 @@ class CemiFrame
 
     uint8_t calcCrcTP(uint8_t* buffer, uint16_t len);
     bool valid() const;
+    // True when the constructor could not carry the requested apduLength. The caller
+    // may then have written its payload past buffer[] into the members behind it, so
+    // nothing in this frame may be dereferenced.
+    bool oversized() const { return _oversized; }
 
   private:
     // Sized with APDU_LPDU_DIFF (not NPDU_LPDU_DIFF): CemiFrame(apduLength) fills up to
@@ -84,6 +94,7 @@ class CemiFrame
     TPDU _tpdu;
     APDU _apdu;
     uint16_t _length = 0; // only set if created from byte array
+    bool _oversized = false; // apduLength > MAX_APDU_OCTET_COUNT requested -> valid() false, frame carries nothing
 
 #ifdef USE_RF
     // FIXME: integrate this propery in _data
