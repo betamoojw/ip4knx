@@ -178,6 +178,20 @@ void CemiFrame::fillTelegramTP(uint8_t* data)
     {
         memcpy(data, _ctrl1, len - 1);
     }
+
+    // 03_02_02 2.2.2: the TP1 control field of an L_Data frame is "FT 0 r 1 p1 p0 0 0"
+    // — only frame type, repeat flag and priority are free, bits 6, 4, 1 and 0 are
+    // fixed. The cEMI control field reuses those bits for the system-broadcast flag,
+    // the acknowledge request and the confirm flag, and a tunnel client controls all
+    // of them, so copying the octet unchanged can put a control field on the line that
+    // TP1 does not define: the transceiver rejects the frame, nothing reaches the bus,
+    // no confirm comes back, and the transmitter waits for it until its watchdog
+    // resets the chip. Locally originated frames are unaffected — the network layer
+    // already converts a system broadcast to broadcast for a closed medium, which a
+    // tunnelled frame bypasses. A conforming frame goes out byte-identical.
+    // (upstream 5706fb8)
+    data[0] = (data[0] & 0xAC) | Broadcast;
+
     data[len - 1] = calcCrcTP(data, len - 1);
 }
 

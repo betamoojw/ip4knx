@@ -66,7 +66,25 @@ void DataLinkLayer::dataRequestFromTunnel(CemiFrame& frame)
     _cemiServer->dataConfirmationToTunnel(frame);
 
     frame.messageCode(L_data_ind);
-    
+
+    // 03_06_03 4.1.5.3.3: the system-broadcast flag applies to open media only, and a
+    // cEMI server to a closed medium shall ignore it. The flag is the client's, and
+    // frameReceived() below dispatches on it: a broadcast service sent with the flag
+    // cleared reached the system-broadcast handler, which serves a different set of
+    // services and drops the rest. Normalizing here also keeps the local view in step
+    // with the line, where fillTelegramTP() forces the same bit. (upstream 9bde6c7)
+    if (mediumType() == DptMedium::KNX_TP1 || mediumType() == DptMedium::KNX_IP)
+        frame.systemBroadcast(Broadcast);
+
+    // 03_02_02 2.2.5.1: the extended frame shall not be used where the standard frame
+    // is sufficient. A client can ask for either, and sendTelegram() already picks the
+    // standard frame for a short APDU on the network-layer path, which a tunnelled
+    // frame bypasses. "Sufficient" also requires an empty extended frame format field,
+    // which the standard frame cannot carry — asking valid() keeps an LTE frame
+    // extended instead of dropping its address type. (upstream 7825b8b)
+    if (mediumType() == DptMedium::KNX_TP1 && frame.valid() && frame.npdu().octetCount() <= 15)
+        frame.frameType(StandardFrame);
+
     // Send to local stack ( => cemiServer for potential other tunnel and network layer for routing)
     frameReceived(frame);
 
