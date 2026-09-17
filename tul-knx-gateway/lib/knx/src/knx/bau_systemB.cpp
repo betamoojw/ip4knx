@@ -455,6 +455,16 @@ void BauSystemB::functionPropertyCommandIndication(Priority priority, HopCountTy
             if(_functionProperty != 0)
                 if(_functionProperty(objectIndex, propertyId, length, data, resultData, resultLength))
                     handled = true;
+
+            if (!handled && prop != nullptr)
+            {
+                // 03_03_07 §3.4.7.3: a property that exists but is not
+                // PDT_FUNCTION is answered with a response carrying neither
+                // return code nor data. Staying silent would leave the caller
+                // in a layer-4 timeout instead.
+                resultLength = 0;
+                handled = true;
+            }
         }
     } else {
         if(_functionProperty != 0)
@@ -477,8 +487,7 @@ void BauSystemB::functionPropertyStateIndication(Priority priority, HopCountType
     // an A_FunctionPropertyState_Read for a property that exists but is not
     // PDT_FUNCTION fell through to the response below with resultLength still at
     // the buffer size (255) and resultData uninitialised, because this device
-    // registers no _functionPropertyState callback. Answering is also wrong per
-    // 03_04_01: a state read is answered by the function, or not at all.
+    // registers no _functionPropertyState callback.
     bool handled = false;
 
     InterfaceObject* obj = getInterfaceObject(objectIndex);
@@ -495,6 +504,14 @@ void BauSystemB::functionPropertyStateIndication(Priority priority, HopCountType
             if(_functionPropertyState != 0)
                 if(_functionPropertyState(objectIndex, propertyId, length, data, resultData, resultLength))
                     handled = true;
+
+            if (!handled && prop != nullptr)
+            {
+                // 03_03_07 §3.4.7.3, same rule as for the command twin: answer
+                // without return code and without data.
+                resultLength = 0;
+                handled = true;
+            }
         }
     } else {
         if(_functionPropertyState != 0)
@@ -573,7 +590,12 @@ void BauSystemB::functionPropertyExtStateIndication(Priority priority, HopCountT
 {
     if (length == 0) return; // the reserved input octet data[0] must be present; drop a truncated ext function-property state read
     uint8_t resultData[kFunctionPropertyResultBufferMaxSize];
-    uint8_t resultLength = sizeof(resultData); // tell the callee the maximum size of the buffer
+    // Return code only, like the ext command twin. The error paths below write
+    // just resultData[0]; with the buffer size here, the response carried 254
+    // further octets of uninitialised stack onto the bus. 03_03_07 §3.4.8.3:
+    // the returned PDU shall not contain the data field. The PDT_FUNCTION and
+    // PDT_CONTROL branches set the length they actually produce.
+    uint8_t resultLength = 1;
 
     InterfaceObject* obj = getInterfaceObject(objectType, objectInstance);
     if(obj)
