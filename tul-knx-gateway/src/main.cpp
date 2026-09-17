@@ -1768,6 +1768,13 @@ uint32_t lastWifiCheck = 0;
 bool wasConnected = true;
 bool otaValidationPending = true;
 
+// Rollback gate, part 1. The Arduino core's initArduino() runs before setup()
+// and, unless this weak hook says otherwise, marks a PENDING_VERIFY image
+// valid on the spot (cores/esp32/esp32-hal-misc.c). Without this override the
+// 30 s gate in loop() never saw PENDING_VERIFY and a freshly updated image
+// that crashed in setup() or early loop() was kept instead of rolled back.
+extern "C" bool verifyRollbackLater() { return true; }
+
 // WiFi active-reconnect watchdog. The core auto-reconnect recovers a clean
 // disassociation but NOT a silent drop or a lost DHCP lease; these track the
 // down-duration so loop() can force a fresh re-association + DHCP itself.
@@ -1786,11 +1793,12 @@ void loop() {
         knx.progMode(v);
     }
 
-    // Anti-brick: arduino-esp32 v3's bootloader ships with
-    // CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y, so a freshly OTA'd partition
-    // stays in OTA_IMG_PENDING_VERIFY until we explicitly mark it valid.
-    // If we crash / reset before that, the bootloader reverts to the previous
-    // slot on next boot. 30 s of successful loop() iterations is the gate.
+    // Rollback gate, part 2. The bootloader is built with
+    // CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y, so a freshly updated partition
+    // boots as PENDING_VERIFY and stays there (verifyRollbackLater() above
+    // keeps the core from confirming it early). Any reset before this point —
+    // crash, watchdog, power loss, a user-triggered restart — makes the
+    // bootloader revert to the previous slot. 30 s of loop() is the gate.
     if (otaValidationPending && millis() > 30000) {
         const esp_partition_t* running = esp_ota_get_running_partition();
         esp_ota_img_states_t state;
