@@ -473,7 +473,13 @@ void BauSystemB::functionPropertyStateIndication(Priority priority, HopCountType
     uint8_t resultData[kFunctionPropertyResultBufferMaxSize];
     uint8_t resultLength = sizeof(resultData); // tell the callee the maximum size of the buffer
 
-    bool handled = true;
+    // Start out unhandled, as the command twin above does. Initialised to true,
+    // an A_FunctionPropertyState_Read for a property that exists but is not
+    // PDT_FUNCTION fell through to the response below with resultLength still at
+    // the buffer size (255) and resultData uninitialised, because this device
+    // registers no _functionPropertyState callback. Answering is also wrong per
+    // 03_04_01: a state read is answered by the function, or not at all.
+    bool handled = false;
 
     InterfaceObject* obj = getInterfaceObject(objectIndex);
     if(obj)

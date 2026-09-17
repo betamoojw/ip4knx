@@ -669,6 +669,13 @@ void ApplicationLayer::adcReadResponse(AckType ack, Priority priority, HopCountT
 void ApplicationLayer::functionPropertyStateResponse(AckType ack, Priority priority, HopCountType hopType, uint16_t asap, const SecurityControl& secCtrl,
                                                      uint8_t objectIndex, uint8_t propertyId, uint8_t* resultData, uint8_t resultLength)
 {
+    // CemiFrame takes the APDU length in a uint8_t, and the payload is copied
+    // independently of it: an oversized length truncates the frame but not the
+    // memcpy, which then runs past the frame buffer (0xff + APDU_LPDU_DIFF) into
+    // the members behind it. The payload starts 13 octets into that buffer.
+    if (resultLength > 251)
+        resultLength = 251;
+
     CemiFrame frame(3 + resultLength);
     APDU& apdu = frame.apdu();
     apdu.type(FunctionPropertyStateResponse);
@@ -688,6 +695,11 @@ void ApplicationLayer::functionPropertyStateResponse(AckType ack, Priority prior
 void ApplicationLayer::functionPropertyExtStateResponse(AckType ack, Priority priority, HopCountType hopType, uint16_t asap, const SecurityControl& secCtrl,
                                                         uint16_t objectType, uint8_t objectInstance, uint16_t propertyId, uint8_t* resultData, uint8_t resultLength)
 {
+    // Same bound as functionPropertyStateResponse; here the payload starts 16
+    // octets into the frame buffer.
+    if (resultLength > 248)
+        resultLength = 248;
+
     CemiFrame frame(5 + resultLength + 1);
     APDU& apdu = frame.apdu();
     apdu.type(FunctionPropertyExtStateResponse);
@@ -942,6 +954,12 @@ void ApplicationLayer::keyWriteResponse(AckType ack, Priority priority, HopCount
 void ApplicationLayer::propertyDataSend(ApduType type, AckType ack, Priority priority, HopCountType hopType, uint16_t asap, const SecurityControl& secCtrl,
     uint8_t objectIndex, uint8_t propertyId, uint8_t numberOfElements, uint16_t startIndex, uint8_t* data, uint8_t length)
 {
+    // Same bound as the function-property responses; payload starts 15 octets
+    // into the frame buffer. The callers already clamp elementSize*count, this
+    // is the bound at the copy itself.
+    if (length > 249)
+        length = 249;
+
     CemiFrame frame(5 + length);
     APDU& apdu = frame.apdu();
     apdu.type(type);
@@ -964,6 +982,11 @@ void ApplicationLayer::propertyDataSend(ApduType type, AckType ack, Priority pri
 void ApplicationLayer::propertyExtDataSend(ApduType type, AckType ack, Priority priority, HopCountType hopType, uint16_t asap, const SecurityControl& secCtrl,
     uint16_t objectType, uint8_t objectInstance, uint8_t propertyId, uint8_t numberOfElements, uint16_t startIndex, uint8_t* data, uint8_t length)
 {
+    // Same bound as propertyDataSend; the extended header pushes the payload 19
+    // octets into the frame buffer.
+    if (length > 245)
+        length = 245;
+
     CemiFrame frame(9 + length);
     APDU& apdu = frame.apdu();
     apdu.type(type);
