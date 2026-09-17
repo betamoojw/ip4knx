@@ -82,6 +82,18 @@ if [ -z "$SSID" ] || [ -z "$PASSWORD" ]; then
     exit 1
 fi
 
+# The TULX32 image carries the recovery bootloader and the recovery system and
+# belongs on TULX32 hardware only. It shares the ESP32-C6 family with the TUL32,
+# so the chip check below would happily flash it onto a TUL32 — where the
+# recovery has no partition to live in and the prog button moves to IO14.
+if [ "$TARGET" = "tulx32_esp32c6" ]; then
+    echo -e "${RED}Error: tulx32_esp32c6 is not verified by this script.${NC}"
+    echo "The TULX32 image is flashed on the test bench over the debug adapter;"
+    echo "flashing it onto a TUL32 would install a recovery system that board"
+    echo "has no partition table for."
+    exit 1
+fi
+
 # Determine chip family
 if [[ "$TARGET" == *"esp32c3"* ]]; then
     CHIP="esp32c3"

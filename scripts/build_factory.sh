@@ -87,6 +87,19 @@ if [ "$TARGET" = "tulx32_esp32c6" ]; then
         [ -f "$f" ] || { echo "[Error] missing $f"; exit 1; }
     done
 
+    # Existence is not enough: tulx32_recovery/ is untracked, so a stale or
+    # foreign recovery build would be frozen into the delivered image without
+    # anyone noticing. Bind it to the hashes the repository expects.
+    PIN_FILE="$BUILD_DIR/tulx32_recovery.sha256"
+    [ -f "$PIN_FILE" ] || { echo "[Error] missing $PIN_FILE"; exit 1; }
+    if ! ( cd "$REC_DIR" && sha256sum -c --quiet "$PIN_FILE" ); then
+        echo "[Error] recovery binaries do not match $PIN_FILE"
+        echo "        Bootloader and recovery cannot be changed after delivery."
+        echo "        Update the pin file only together with a new recovery release."
+        exit 1
+    fi
+    echo "      recovery binaries match $PIN_FILE"
+
     IMAGES=(
         "${BOOTLOADER_ADDR}" "$REC_DIR/bootloader.bin"
         "${PARTITIONS_ADDR}" "$PIO_OUT/partitions.bin"

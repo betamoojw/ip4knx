@@ -1353,6 +1353,13 @@ void setup() {
             // Update for gated requests, so without this check the handler
             // would answer a rejected upload with 200/"ok".
             if (!mutationAllowed(request)) return;
+#ifdef TULX32_RECOVERY
+            // One application slot: Update.begin() can only fail here, with
+            // "No Partition Available" instead of saying where firmware comes
+            // from on this variant. Answer like /api/update/install does.
+            request->send(409, "application/json", "{\"error\":\"install through the recovery system\"}");
+            return;
+#endif
             bool ok = !Update.hasError();
             String body = ok
                 ? String("{\"status\":\"ok\"}")
@@ -1376,6 +1383,11 @@ void setup() {
                     Serial.println("OTA: rejected (cross-origin or AP provisioning mode)");
                     return;
                 }
+#ifdef TULX32_RECOVERY
+                // Never reach Update.begin() on the single-slot layout; the
+                // chunks drain here and the response handler answers 409.
+                return;
+#endif
                 Serial.printf("OTA: upload start: %s\n", filename.c_str());
                 if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
                     Update.printError(Serial);
