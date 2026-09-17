@@ -25,6 +25,16 @@ bool TpUartDataLinkLayer::sendFrame(CemiFrame &cemiFrame)
     cemiFrame.fillTelegramTP(tpData);
 
     TPUart::Frame *tpFrame = new TPUart::Frame((char *)tpData, cemiFrame.telegramLengthtTP());
+    // Two allocations can fail here: the frame object and the octet buffer it copies
+    // into. An empty frame reports data() == nullptr -> bail instead of handing a
+    // null pointer to the transmit queue.
+    if (!tpFrame || tpFrame->data() == nullptr)
+    {
+        free(tpData);
+        delete tpFrame; // no-op on nullptr; the queue never took ownership
+        dataConReceived(cemiFrame, false);
+        return false;
+    }
 
     // when not connected or in monitoring mode, discard the frame - silently
     if (!_tpuart.isConnected() || _tpuart.isMonitoring())
@@ -208,6 +218,9 @@ void TpUartDataLinkLayer::processRxFrame(TPUart::Frame &tpFrame)
 #endif
 
     uint8_t *cemiData = (uint8_t *)tpFrame.cemiData();
+    if (cemiData == nullptr) // allocation failed under heap pressure -> drop, do not build a frame on null
+        return;
+
     CemiFrame cemiFrame(cemiData, tpFrame.cemiSize());
 
     if (tpFrame.isTransmitted()) {

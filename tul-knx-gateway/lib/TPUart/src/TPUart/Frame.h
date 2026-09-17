@@ -51,6 +51,11 @@ namespace TPUart
         {
             _deleteData = true;
             _data = (const char *)malloc(size);
+            // Under heap pressure — an IP->TP routing flood is enough — this malloc
+            // returns null and the copy below would write to address 0. Leave _data
+            // null instead; every caller can see it through data() and drop the frame.
+            if (_data == nullptr)
+                return;
             memcpy((char *)_data, data, size);
         }
         Frame(const char *data, bool deleteData) : _data(data), _deleteData(deleteData) {}
@@ -283,6 +288,11 @@ namespace TPUart
         char *cemiData()
         {
             char *cemiBuffer = (char *)malloc(cemiSize());
+            // Same as in the copying constructor: without this check the writes below
+            // go to address 0 when the allocation fails. The caller already has to
+            // handle the null it gets back — it has to free the buffer anyway.
+            if (cemiBuffer == nullptr)
+                return nullptr;
 
             // Das CEMI erwartet die Daten im Extended format inkl. zwei zusätzlicher Bytes am Anfang.
             cemiBuffer[0] = 0x29;
