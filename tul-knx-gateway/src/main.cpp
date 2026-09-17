@@ -1817,6 +1817,17 @@ void setup() {
     }
 }
 
+// Is there an interface that could carry KNXnet/IP right now? The ethernet build
+// tracks which one that is; everywhere else it is the station, and "associated"
+// alone is not enough — a station holding 0.0.0.0 has no netif to join on.
+static bool knxNetworkUp() {
+#ifdef W5500_ETH
+    return currentActiveIf() != IF_NONE;
+#else
+    return WiFi.status() == WL_CONNECTED && (uint32_t)WiFi.localIP() != 0;
+#endif
+}
+
 // Re-arm the KNXnet/IP routing group on whatever interface carries us now.
 // enabled(false/true) is closeMultiCast() + setupMultiCast() on the IP data
 // link layer; only call it when an interface is actually up (see loop()).
@@ -1970,8 +1981,17 @@ void loop() {
     if (millis() - lastMcastRefresh > 120000UL) {
         lastMcastRefresh = millis();
         auto ipDl = ((Bau091A&)knx.bau()).getPrimaryDataLinkLayer();
-        if (ipDl)
-            ipDl->refreshMultiCast();
+        if (ipDl) {
+            if (!ipDl->enabled() && knxNetworkUp()) {
+                // No endpoint while an interface is up: a join can fail at boot or
+                // on a socket shortage, and neither produces the interface edge the
+                // other two call sites wait for. Without this the gateway stays
+                // silent until someone power-cycles it.
+                knxRejoinRouting("retry");
+            } else {
+                ipDl->refreshMultiCast();
+            }
+        }
     }
 
     // Track the NCN link so /api/status reports what is true now, not what was

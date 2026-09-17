@@ -1191,10 +1191,25 @@ void IpDataLinkLayer::enabled(bool value)
 //    _println(_deviceObject.individualAddress());
     if (value && !_enabled)
     {
+        // A configuration tool may write PID_ROUTING_MULTICAST_ADDRESS, and the value
+        // is persisted. An address outside 224.0.0.0/4, or inside the local control
+        // block 224.0.0.0/24 which lwIP refuses, cannot be joined — and because a
+        // failed join leaves the whole IP path disabled below, one bad value would
+        // take tunnelling with it and survive every reboot. Fall back to the fixed
+        // KNXnet/IP group (03_08_02 8.5.2.1) instead of going dark.
+        uint32_t group = _ipParameters.propertyValue<uint32_t>(PID_ROUTING_MULTICAST_ADDRESS);
+        const uint8_t firstOctet = (uint8_t)(group >> 24);
+        const bool linkLocal = (group >> 8) == 0xE00000; // 224.0.0.0/24
+        if (firstOctet < 224 || firstOctet > 239 || linkLocal)
+        {
+            println("routing multicast address unusable, falling back to 224.0.23.12");
+            group = 0xE000170C;
+        }
+
         // enabled() must not claim an endpoint the join did not produce: a device
         // that keeps link and address but never joined answers no SEARCH_REQUEST,
         // while status page and LED report a healthy gateway.
-        _enabled = _platform.setupMultiCast(_ipParameters.propertyValue<uint32_t>(PID_ROUTING_MULTICAST_ADDRESS), KNXIP_MULTICAST_PORT);
+        _enabled = _platform.setupMultiCast(group, KNXIP_MULTICAST_PORT);
         return;
     }
 
