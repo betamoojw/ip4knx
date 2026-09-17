@@ -277,15 +277,18 @@ void CemiServer::handleMPropRead(CemiFrame& frame, uint8_t channelId)
     // so that the device and the cEMI client/server connection(tunnel) can operate simultaneously.
     // KNX IP Interfaces which offer multiple simultaneous tunnel connections seem to operate the same way.
     // Each tunnel has its own cEMI client address which is based on the main device address.
-    if (((ObjectType) objectType == OT_DEVICE) && 
+    // Only patch the actual address element (startIndex != 0). A start_index == 0
+    // read returns the element COUNT, two octets; patching data[0] there corrupts the
+    // count the client reads — it sees 0x0101 instead of 0x0001. (upstream e401272)
+    if (((ObjectType) objectType == OT_DEVICE) &&
                         (propertyId == PID_DEVICE_ADDR) &&
-                        (numberOfElements == 1))
+                        (numberOfElements == 1) && startIndex != 0)
     {
         data[0] = (uint8_t) (_clientAddress & 0xFF);
     }
-    else if (((ObjectType) objectType == OT_DEVICE) && 
+    else if (((ObjectType) objectType == OT_DEVICE) &&
                         (propertyId == PID_SUBNET_ADDR) &&
-                        (numberOfElements == 1))
+                        (numberOfElements == 1) && startIndex != 0)
     {
         data[0] = (uint8_t) ((_clientAddress >> 8) & 0xFF);
     }
@@ -361,10 +364,13 @@ void CemiServer::handleMPropWrite(CemiFrame& frame, uint8_t channelId)
 
     printHex(" -> data: ", requestData, requestDataSize);
 
-    // Patch request for device address in device object
-    if (((ObjectType) objectType == OT_DEVICE) && 
+    // Patch request for device address in device object. requestDataSize is checked
+    // because it is derived from the frame's own length: a seven-octet M_PropWrite
+    // leaves it at zero, and requestData[0] would then read the octet behind the cEMI
+    // view — in the ingress buffer — and store it as the client address.
+    if (((ObjectType) objectType == OT_DEVICE) &&
                         (propertyId == PID_DEVICE_ADDR) &&
-                        (numberOfElements == 1))
+                        (numberOfElements == 1) && requestDataSize >= 1)
     {
         // Temporarily store new cEMI client address in memory
         // We also be sent back if the client requests it again
@@ -372,9 +378,9 @@ void CemiServer::handleMPropWrite(CemiFrame& frame, uint8_t channelId)
         print("cEMI client address: ");
         println(_clientAddress, HEX);
     }
-    else if (((ObjectType) objectType == OT_DEVICE) && 
+    else if (((ObjectType) objectType == OT_DEVICE) &&
                         (propertyId == PID_SUBNET_ADDR) &&
-                        (numberOfElements == 1))
+                        (numberOfElements == 1) && requestDataSize >= 1)
     {
         // Temporarily store new cEMI client address in memory
         // We also be sent back if the client requests it again
