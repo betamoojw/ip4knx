@@ -280,13 +280,26 @@ void CemiServer::handleMPropRead(CemiFrame& frame, uint8_t channelId)
     // Only patch the actual address element (startIndex != 0). A start_index == 0
     // read returns the element COUNT, two octets; patching data[0] there corrupts the
     // count the client reads — it sees 0x0101 instead of 0x0001. (upstream e401272)
-    if (((ObjectType) objectType == OT_DEVICE) &&
+    // And not at all on a KNXnet/IP device management connection: there the client
+    // does local device management and reads the address OF THIS DEVICE. 03_06_03
+    // 4.2.2.2 assigns PID_SUBNET_ADDR and PID_DEVICE_ADDR in the device object to the
+    // individual address of the cEMI server device; the cEMI CLIENT address has its
+    // own home in the cEMI server object. The substitution stays where it was written
+    // for: USB, and a data tunnel, where the client writes the value itself before
+    // reading it back. (upstream f16aff2)
+    bool patchClientAddress = true;
+#ifdef KNX_TUNNELING
+    if (_dataLinkLayerPrimary != nullptr && _dataLinkLayerPrimary->isConfigChannel(channelId))
+        patchClientAddress = false;
+#endif
+
+    if (patchClientAddress && ((ObjectType) objectType == OT_DEVICE) &&
                         (propertyId == PID_DEVICE_ADDR) &&
                         (numberOfElements == 1) && startIndex != 0)
     {
         data[0] = (uint8_t) (_clientAddress & 0xFF);
     }
-    else if (((ObjectType) objectType == OT_DEVICE) &&
+    else if (patchClientAddress && ((ObjectType) objectType == OT_DEVICE) &&
                         (propertyId == PID_SUBNET_ADDR) &&
                         (numberOfElements == 1) && startIndex != 0)
     {

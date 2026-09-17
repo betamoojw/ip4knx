@@ -39,6 +39,9 @@ class DataLinkLayer
     virtual void dataConfirmationToTunnel(CemiFrame& frame);
     virtual void dataIndicationToTunnel(CemiFrame& frame);
     virtual bool isTunnelAddress(uint16_t addr);
+    // Is this channel a KNXnet/IP device management connection rather than a data
+    // tunnel? The cEMI server answers a property read differently on each.
+    virtual bool isConfigChannel(uint8_t channelId);
 #endif
 #endif
 

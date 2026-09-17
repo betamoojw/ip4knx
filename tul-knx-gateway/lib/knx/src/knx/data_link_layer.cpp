@@ -44,6 +44,11 @@ void DataLinkLayer::dataRequestToChannelId(CemiFrame& frame, uint8_t channelId)
     println("default dataRequestToChannelId");
 }
 
+bool DataLinkLayer::isConfigChannel(uint8_t channelId)
+{
+    return false; // a medium without tunnels has no device management connection
+}
+
 void DataLinkLayer::dataConfirmationToTunnel(CemiFrame& frame)
 {
     println("default dataConfirmationToTunnel");

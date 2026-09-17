@@ -266,6 +266,15 @@ void IpDataLinkLayer::sendFrameToTunnel(KnxIpTunnelConnection *tunnel, CemiFrame
     _platform.sendBytesUniCast(tunnel->IpAddress, tunnel->PortData, req.data(), req.totalLength());
 }
 
+bool IpDataLinkLayer::isConfigChannel(uint8_t channelId)
+{
+    for(int i = 0; i < KNX_TUNNELING; i++)
+        if(tunnels[i].ChannelId == channelId)
+            return tunnels[i].IsConfig;
+
+    return false;
+}
+
 bool IpDataLinkLayer::isTunnelAddress(uint16_t addr)
 {
     if(addr == 0)
