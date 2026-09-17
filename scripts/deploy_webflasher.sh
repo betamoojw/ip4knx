@@ -10,8 +10,15 @@
 #   binaries/factory_tul_esp32c3.bin      — full image for WebFlasher
 #   binaries/factory_tul32_esp32c6.bin
 #   tul-knx-gateway/.pio/build/<env>/firmware.bin — raw app for over-HTTP OTA
+#     envs: tul_esp32c3, tul32_esp32c6, tulx32_esp32c6
 # Output (gitignored):
 #   webflasher/
+#
+# The TULX32 has an "ota" entry but deliberately NO builds[] entry: ESP Web
+# Tools picks a build by chipFamily alone, and TUL32 and TULX32 are both
+# ESP32-C6 — a second entry would just shadow the first. Shop TULX32 boards are
+# flashed on the test bench over the debug adapter (build_factory.sh), not from
+# this page. Do not "fix" this by adding a build here.
 # Default target:
 #   10.10.22.1:/var/www/install/ip4knx/   →  https://install.busware.de/ip4knx/
 #
@@ -41,12 +48,13 @@ missing=0
 for bin in factory_tul_esp32c3.bin factory_tul32_esp32c6.bin; do
     [ -f "$BINARIES_DIR/$bin" ] || { echo "ERROR: missing $BINARIES_DIR/$bin"; missing=1; }
 done
-for env in tul_esp32c3 tul32_esp32c6; do
+for env in tul_esp32c3 tul32_esp32c6 tulx32_esp32c6; do
     [ -f "$BUILD_DIR/$env/firmware.bin" ] || { echo "ERROR: missing $BUILD_DIR/$env/firmware.bin"; missing=1; }
 done
 if [ $missing -ne 0 ]; then
     echo ""
-    echo "Hint: ./scripts/build_factory.sh tul_esp32c3  and  tul32_esp32c6  first."
+    echo "Hint: ./scripts/build_factory.sh tul_esp32c3  and  tul32_esp32c6  first,"
+    echo "      and  pio run -e tulx32_esp32c6  for the TULX32 OTA image."
     exit 1
 fi
 
@@ -57,10 +65,12 @@ VERSION="${VER_MAJOR_MINOR}.${VER_BUILD}"
 
 MD5_C3="$(md5sum "$BUILD_DIR/tul_esp32c3/firmware.bin"   | awk '{print $1}')"
 MD5_C6="$(md5sum "$BUILD_DIR/tul32_esp32c6/firmware.bin" | awk '{print $1}')"
+MD5_TULX32="$(md5sum "$BUILD_DIR/tulx32_esp32c6/firmware.bin" | awk '{print $1}')"
 
 echo "Version: $VERSION"
 echo "MD5 C3:  $MD5_C3"
 echo "MD5 C6:  $MD5_C6"
+echo "MD5 TULX32: $MD5_TULX32"
 
 # --- Assemble staging dir -------------------------------------------------
 rm -rf "$STAGE_DIR"
@@ -72,11 +82,13 @@ cp "$BINARIES_DIR/factory_tul_esp32c3.bin"      "$STAGE_DIR/"
 cp "$BINARIES_DIR/factory_tul32_esp32c6.bin"    "$STAGE_DIR/"
 cp "$BUILD_DIR/tul_esp32c3/firmware.bin"        "$STAGE_DIR/firmware_tul_esp32c3.bin"
 cp "$BUILD_DIR/tul32_esp32c6/firmware.bin"      "$STAGE_DIR/firmware_tul32_esp32c6.bin"
+cp "$BUILD_DIR/tulx32_esp32c6/firmware.bin"     "$STAGE_DIR/firmware_tulx32_esp32c6.bin"
 
 # Generate manifest.json from template
 sed -e "s/__VERSION__/$VERSION/g" \
     -e "s/__MD5_C3__/$MD5_C3/g" \
     -e "s/__MD5_C6__/$MD5_C6/g" \
+    -e "s/__MD5_TULX32__/$MD5_TULX32/g" \
     "$TEMPLATES_DIR/manifest.json" > "$STAGE_DIR/manifest.json"
 
 echo ""

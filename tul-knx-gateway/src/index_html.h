@@ -261,7 +261,7 @@ const char index_html[] PROGMEM = R"rawliteral(
                     <hr style="margin: 15px 0; border: 0; border-top: 1px solid #eee;">
                     <div style="font-weight:bold; margin-bottom:6px;" data-i18n="firmware.onlineUpdate">Online Update</div>
                     <small style="color:#666; display:block; margin-bottom:8px;">
-                        <span data-i18n="firmware.onlineUpdateDescription">Update directly from install.busware.de/ip4knx/. The MD5 checksum in the manifest protects integrity. Anti-brick: app1 boot activates only when the MD5 is correct.</span>
+                        <span id="upd_desc" data-i18n="firmware.onlineUpdateDescription">Update directly from install.busware.de/ip4knx/. The MD5 checksum in the manifest protects integrity. Anti-brick: app1 boot activates only when the MD5 is correct.</span>
                     </small>
                     <div class="info-row">
                         <span data-i18n="firmware.latestVersion">Latest Version:</span>
@@ -277,6 +277,7 @@ const char index_html[] PROGMEM = R"rawliteral(
                         <button id="upd-install-btn" class="btn" onclick="installOnlineUpdate()" disabled data-i18n="action.installNow">Install Now</button>
                     </div>
 
+                    <div id="ota_manual">
                     <hr style="margin: 15px 0; border: 0; border-top: 1px solid #eee;">
                     <div style="font-weight:bold; margin-bottom:6px;" data-i18n="firmware.manualFile">Manual Firmware File</div>
                     <small style="color:#666; display:block; margin-bottom:8px;">
@@ -286,6 +287,21 @@ const char index_html[] PROGMEM = R"rawliteral(
                     <div id="ota-status" style="font-size:0.85rem; color:#555; margin-bottom:6px;" data-i18n="ota.noFile">No file selected.</div>
                     <progress id="ota-progress" value="0" max="100" style="width:100%; display:none;"></progress>
                     <button id="ota-btn" class="btn" onclick="startOta()" disabled data-i18n="action.uploadFirmware">Upload Firmware</button>
+                    </div>
+
+                    <!-- Devices with a recovery system (TULX32) have one application slot and install firmware there. -->
+                    <div id="recovery_block" style="display:none;">
+                        <hr style="margin: 15px 0; border: 0; border-top: 1px solid #eee;">
+                        <div style="font-weight:bold; margin-bottom:6px;" data-i18n="firmware.recoveryTitle">Install Firmware</div>
+                        <small style="color:#666; display:block; margin-bottom:8px;">
+                            <span data-i18n="firmware.recoveryDescription">This device installs firmware from its recovery system. Download the firmware file, restart into recovery and upload the file there. Without this page: hold the button for 5 seconds while connecting the KNX bus.</span>
+                        </small>
+                        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                            <a id="rec_download" class="btn" style="display:none; background:#6c757d; text-decoration:none;" href="#" data-i18n="firmware.downloadFile">Download Firmware File</a>
+                            <button id="recovery-btn" class="btn" onclick="enterRecovery()" data-i18n="action.restartRecovery">Restart into Recovery</button>
+                        </div>
+                        <div id="recovery_status" style="font-size:0.85rem; color:#555; margin-top:6px;"></div>
+                    </div>
                 </div>
             </section>
 
@@ -339,7 +355,7 @@ const char index_html[] PROGMEM = R"rawliteral(
             en: {
                 'wifi.searching': 'Searching...', 'wifi.scanTimeout': 'Scan timed out!', 'wifi.scanError': 'Error scanning networks!', 'wifi.ssidRequired': 'SSID cannot be empty!', 'wifi.configurationSaved': 'Configuration saved. The gateway will now restart.', 'error.prefix': 'Error: ', 'wifi.sendError': 'Error sending request!',
                 'update.currentIsLatest': 'Current version is the latest ({latest}).', 'update.loadingManifest': 'Loading manifest…', 'update.availableMessage': 'Update available: {latest} (current {current}).', 'update.installing': 'Installing… {progress} / {total} bytes', 'update.done': 'Success — the gateway is restarting. The page will reload automatically.', 'update.unknownError': 'unknown', 'update.confirm': 'Install the online update now? The gateway will restart afterwards.', 'update.startError': 'Error starting update: {error}',
-                'ota.calculatingMd5': 'Calculating MD5…', 'ota.md5Failed': 'MD5 calculation failed: {error}', 'ota.uploading': 'MD5 {md5} — uploading…', 'ota.success': 'OTA successful — the gateway will restart in about 2 seconds.', 'ota.failed': 'OTA failed (HTTP {status})', 'ota.networkError': 'OTA: network error during upload.', 'knx.toggleError': 'Error changing programming mode!', 'knx.active': 'ACTIVE', 'knx.off': 'OFF', 'wifi.clearConfirm': 'Delete Wi-Fi credentials and restart the gateway permanently in AP mode?', 'wifi.cleared': 'Wi-Fi credentials deleted. The gateway will now restart in AP mode.',
+                'recovery.confirm': 'Restart into the recovery system? The gateway is offline until you start the application again or reconnect the KNX bus.', 'recovery.restarting': 'Restarting into recovery. Reload this address in about 20 seconds.', 'recovery.failed': 'Recovery not available: {error}', 'firmware.onlineUpdateDescriptionRecovery': 'Checks install.busware.de/ip4knx/ for a newer version. Install it with the recovery system below.', 'ota.calculatingMd5': 'Calculating MD5…', 'ota.md5Failed': 'MD5 calculation failed: {error}', 'ota.uploading': 'MD5 {md5} — uploading…', 'ota.success': 'OTA successful — the gateway will restart in about 2 seconds.', 'ota.failed': 'OTA failed (HTTP {status})', 'ota.networkError': 'OTA: network error during upload.', 'knx.toggleError': 'Error changing programming mode!', 'knx.active': 'ACTIVE', 'knx.off': 'OFF', 'wifi.clearConfirm': 'Delete Wi-Fi credentials and restart the gateway permanently in AP mode?', 'wifi.cleared': 'Wi-Fi credentials deleted. The gateway will now restart in AP mode.',
                 'ethernet.wifiOff': 'off (Ethernet active)', 'ethernet.noCable': 'No cable', 'ethernet.connected': 'Connected', 'ethernet.activeForKnx': 'Connected, active for KNX',
                 'ncn.v20v': 'V20V linear voltage regulator within its normal operating range', 'ncn.vdd2': 'DC2 regulator within its normal operating range', 'ncn.vbus': 'KNX bus voltage within its normal range', 'ncn.vfilt': 'Tank capacitor within its normal operating range', 'ncn.xtal': 'Crystal oscillator frequency within its normal range',
                 'ncn.stateConnected': 'Connected', 'ncn.stateDisconnected': 'No response', 'ncn.stateBusmonitor': 'Bus monitor', 'ncn.stateUninitialized': 'No bus detected', 'ncn.stateNoLayer': 'Not initialized', 'ncn.unknownNoConnection': 'Unknown — no connection to the NCN5130',
@@ -376,7 +392,7 @@ const char index_html[] PROGMEM = R"rawliteral(
                 'wifi.selectNetwork': 'Wählen Sie ein Netzwerk...', 'action.scanWifi': 'WLAN Netzwerke suchen', 'update.unknown': 'Stand unbekannt — Suche starten.',
                 'wifi.searching': 'Suche läuft...', 'wifi.scanTimeout': 'Scan-Timeout!', 'wifi.scanError': 'Fehler beim Scannen!', 'wifi.ssidRequired': 'SSID darf nicht leer sein!', 'wifi.configurationSaved': 'Konfiguration gespeichert. Das Gateway startet nun neu.', 'error.prefix': 'Fehler: ', 'wifi.sendError': 'Fehler beim Senden!',
                 'update.currentIsLatest': 'Aktuelle Version ist die neueste ({latest}).', 'update.loadingManifest': 'Manifest wird geladen…', 'update.availableMessage': 'Update verfügbar: {latest} (aktuell {current}).', 'update.installing': 'Installation läuft… {progress} / {total} Bytes', 'update.done': 'Erfolgreich — Gateway startet neu. Seite lädt automatisch.', 'update.unknownError': 'unbekannt', 'update.confirm': 'Online-Update jetzt installieren? Das Gateway startet anschließend neu.', 'update.startError': 'Fehler beim Starten: {error}',
-                'ota.noFile': 'Keine Datei ausgewählt.', 'ota.calculatingMd5': 'Berechne MD5…', 'ota.md5Failed': 'MD5-Berechnung fehlgeschlagen: {error}', 'ota.uploading': 'MD5 {md5} — Upload läuft…', 'ota.success': 'OTA erfolgreich — Gateway startet neu in ~2 s.', 'ota.failed': 'OTA fehlgeschlagen (HTTP {status})', 'ota.networkError': 'OTA: Netzwerkfehler beim Upload.', 'knx.toggleError': 'Fehler beim Umschalten des Programmier-Modus!', 'knx.active': 'AKTIV', 'knx.off': 'AUS', 'wifi.clearConfirm': 'WLAN-Daten löschen und Gateway dauerhaft im AP-Modus neustarten?', 'wifi.cleared': 'WLAN-Daten gelöscht. Das Gateway startet nun im AP-Modus neu.',
+                'recovery.confirm': 'In das Recovery-System neu starten? Das Gateway ist offline, bis Sie die Anwendung wieder starten oder den KNX-Bus neu anschließen.', 'recovery.restarting': 'Neustart in das Recovery-System. Diese Adresse in etwa 20 Sekunden neu laden.', 'recovery.failed': 'Recovery nicht verfügbar: {error}', 'firmware.onlineUpdateDescriptionRecovery': 'Prüft install.busware.de/ip4knx/ auf eine neuere Version. Installiert wird sie über das Recovery-System unten.', 'firmware.recoveryTitle': 'Firmware installieren', 'firmware.recoveryDescription': 'Dieses Gerät installiert Firmware über sein Recovery-System. Firmware-Datei herunterladen, in das Recovery-System neu starten und die Datei dort hochladen. Ohne diese Seite: Taster 5 Sekunden halten und dabei den KNX-Bus anschließen.', 'firmware.downloadFile': 'Firmware-Datei herunterladen', 'action.restartRecovery': 'In Recovery neu starten', 'ota.noFile': 'Keine Datei ausgewählt.', 'ota.calculatingMd5': 'Berechne MD5…', 'ota.md5Failed': 'MD5-Berechnung fehlgeschlagen: {error}', 'ota.uploading': 'MD5 {md5} — Upload läuft…', 'ota.success': 'OTA erfolgreich — Gateway startet neu in ~2 s.', 'ota.failed': 'OTA fehlgeschlagen (HTTP {status})', 'ota.networkError': 'OTA: Netzwerkfehler beim Upload.', 'knx.toggleError': 'Fehler beim Umschalten des Programmier-Modus!', 'knx.active': 'AKTIV', 'knx.off': 'AUS', 'wifi.clearConfirm': 'WLAN-Daten löschen und Gateway dauerhaft im AP-Modus neustarten?', 'wifi.cleared': 'WLAN-Daten gelöscht. Das Gateway startet nun im AP-Modus neu.',
                 'knx.yes': 'Ja', 'knx.no': 'Nein', 'status.apMode': 'AP Modus Aktiv', 'status.wifiConnected': 'WLAN Verbunden', 'status.wifiDisconnected': 'WLAN Getrennt', 'status.ethernetActive': 'Ethernet Aktiv', 'status.wifiStandby': 'WLAN Standby'
             }
         };
@@ -563,6 +579,14 @@ const char index_html[] PROGMEM = R"rawliteral(
                 prog.style.display = 'none';
             }
 
+            const dl = document.getElementById('rec_download');
+            if (recoveryMode && d.state === 'available' && d.url) {
+                dl.href = d.url;
+                dl.style.display = '';
+            } else {
+                dl.style.display = 'none';
+            }
+
             checkBtn.disabled   = (d.state === 'checking' || d.state === 'installing');
             installBtn.disabled = (d.state !== 'available');
 
@@ -593,6 +617,19 @@ const char index_html[] PROGMEM = R"rawliteral(
                     document.getElementById('upd_status').innerText = t('error.prefix') + e;
                     document.getElementById('upd-check-btn').disabled = false;
                 });
+        }
+
+        let recoveryMode = false;
+        function enterRecovery() {
+            if (!confirm(t('recovery.confirm'))) return;
+            const st = document.getElementById('recovery_status');
+            fetch('/api/recovery', { method: 'POST' })
+                .then(r => r.json().then(j => ({ ok: r.ok, j: j })))
+                .then(({ ok, j }) => {
+                    st.innerText = ok ? t('recovery.restarting') : t('recovery.failed', {error: j.error || '?'});
+                    if (ok) document.getElementById('recovery-btn').disabled = true;
+                })
+                .catch(e => { st.innerText = t('recovery.failed', {error: e}); });
         }
 
         function installOnlineUpdate() {
@@ -925,6 +962,12 @@ const char index_html[] PROGMEM = R"rawliteral(
 
                     // Build info
                     if (data.build) {
+                        const rec = !!data.build.recovery;
+                        recoveryMode = rec;
+                        document.getElementById('ota_manual').style.display = rec ? 'none' : '';
+                        document.getElementById('recovery_block').style.display = rec ? '' : 'none';
+                        document.getElementById('upd-install-btn').style.display = rec ? 'none' : '';
+                        document.getElementById('upd_desc').innerText = rec ? t('firmware.onlineUpdateDescriptionRecovery') : t('firmware.onlineUpdateDescription');
                         document.getElementById('fw_version').innerText = data.build.version;
                         document.getElementById('build_number').innerText = data.build.number;
                         document.getElementById('build_git').innerText = data.build.git;

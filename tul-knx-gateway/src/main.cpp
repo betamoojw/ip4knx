@@ -394,9 +394,28 @@ extern "C" void esp_brownout_disable(void);
 // pinning a Let's-Encrypt root rotates faster than firmware does; MD5 from the
 // manifest provides the integrity check that TLS cert validation would.
 // ============================================================================
+#if defined(TULX32_RECOVERY)
+  #define BW_IMG_VARIANT "tulx32"
+#elif defined(CONFIG_IDF_TARGET_ESP32C6)
+  #define BW_IMG_VARIANT "tul32"
+#elif defined(CONFIG_IDF_TARGET_ESP32C3)
+  #define BW_IMG_VARIANT "tul"
+#endif
+
+#ifdef BW_IMG_VARIANT
+// Image marker. The TULX32 recovery scans an uploaded image for it and installs
+// firmware without it only after the user confirms. Printed at boot, which also
+// keeps the linker from dropping it.
+__attribute__((used, retain)) static const char bwImgMarker[] =
+    "BWIMG1|variant=" BW_IMG_VARIANT "|version=" FW_VERSION_STRING "|";
+#endif
+
 static const char* UPDATE_MANIFEST_URL = "https://install.busware.de/ip4knx/manifest.json";
 
-#if defined(CONFIG_IDF_TARGET_ESP32C3)
+#if defined(TULX32_RECOVERY)
+  // The TULX32 must never pick up the TUL32 image that shares the chip family.
+  #define UPDATE_CHIP_KEY "ESP32-C6-TULX32"
+#elif defined(CONFIG_IDF_TARGET_ESP32C3)
   #define UPDATE_CHIP_KEY "ESP32-C3"
 #elif defined(CONFIG_IDF_TARGET_ESP32C6)
   #define UPDATE_CHIP_KEY "ESP32-C6"
@@ -807,7 +826,8 @@ static String updateStatusJson() {
     j += "\"available\":" + String(updateInfo.state == UPD_AVAILABLE ? "true" : "false") + ",";
     j += "\"progress\":" + String((unsigned)updateInfo.progress) + ",";
     j += "\"total\":" + String((unsigned)updateInfo.total) + ",";
-    j += "\"error\":\"" + jsonEscape(String(updateInfo.error)) + "\"";
+    j += "\"error\":\"" + jsonEscape(String(updateInfo.error)) + "\",";
+    j += "\"url\":\"" + jsonEscape(String(updateInfo.url)) + "\"";
     j += "}";
     return j;
 }
@@ -899,6 +919,9 @@ void setup() {
 #endif
 
     Serial.println("Starting TUL KNX/IP Gateway");
+#ifdef BW_IMG_VARIANT
+    Serial.println(bwImgMarker);
+#endif
     ArduinoPlatform::SerialDebug = &Serial;
 
     pinMode(KNX_LED, OUTPUT);
@@ -1416,6 +1439,11 @@ void setup() {
     });
     server.on("/api/update/install", HTTP_POST, [](AsyncWebServerRequest *request){
         if (!mutationAllowed(request)) return;
+#ifdef TULX32_RECOVERY
+        // One application slot: firmware is installed from the recovery system.
+        request->send(409, "application/json", "{\"error\":\"install through the recovery system\"}");
+        return;
+#endif
         bool ok = kickOffUpdateInstall();
         AsyncWebServerResponse *resp = request->beginResponse(ok ? 202 : 409,
             "application/json", updateStatusJson());
@@ -1424,6 +1452,28 @@ void setup() {
     server.on("/api/update/status", HTTP_GET, [](AsyncWebServerRequest *request){
         request->send(200, "application/json", updateStatusJson());
     });
+
+#ifdef TULX32_RECOVERY
+    // Restart into the recovery system (factory partition). Setting the boot
+    // partition verifies the recovery image first and erases otadata; the
+    // recovery points otadata back at the application as soon as it starts, so
+    // a power cycle without an upload returns here.
+    server.on("/api/recovery", HTTP_POST, [](AsyncWebServerRequest *request){
+        if (!mutationAllowed(request)) return;
+        const esp_partition_t *factory = esp_partition_find_first(
+            ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_FACTORY, NULL);
+        esp_err_t err = factory ? esp_ota_set_boot_partition(factory) : ESP_ERR_NOT_FOUND;
+        if (err != ESP_OK) {
+            request->send(500, "application/json",
+                String("{\"error\":\"recovery not available: ") + esp_err_to_name(err) + "\"}");
+            return;
+        }
+        Serial.println("Recovery: boot partition set, restarting");
+        request->send(200, "application/json", "{\"status\":\"ok\"}");
+        pendingReboot = true;
+        rebootTime = millis();
+    });
+#endif
 
     // ProgMode toggle: accepts ?state=on|off|toggle (default: toggle).
     // Returns the new state after the operation.
@@ -1634,7 +1684,12 @@ void setup() {
             }
         }
         json += "\"partition\":\"" + String(part_label) + "\",";
-        json += "\"ota_state\":\"" + String(state_str) + "\"";
+        json += "\"ota_state\":\"" + String(state_str) + "\",";
+#ifdef TULX32_RECOVERY
+        json += "\"recovery\":true";
+#else
+        json += "\"recovery\":false";
+#endif
         json += "},";
 
         // Hardware info

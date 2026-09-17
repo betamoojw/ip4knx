@@ -6,11 +6,18 @@
 # The factory binary contains: bootloader, partition table, and firmware.
 #
 # Usage:
-#   ./build_factory.sh [tul_esp32c3|tul32_esp32c6]
+#   ./build_factory.sh [tul_esp32c3|tul32_esp32c6|tulx32_esp32c6]
 #
 # Output:
 #   binaries/factory_tul_esp32c3.bin
 #   binaries/factory_tul32_esp32c6.bin
+#   binaries/factory_tulx32_esp32c6.bin
+#
+# The TULX32 image is NOT the same shape as the TUL/TUL32 one. It ships the
+# recovery system, so it carries the recovery bootloader (with the S1 check)
+# instead of the framework bootloader, an otadata that selects ota_0, and the
+# recovery app in the factory partition at 0x2B0000. Those binaries are built
+# outside this repository and are expected in tul-knx-gateway/tulx32_recovery/.
 
 set -e
 
@@ -53,8 +60,8 @@ else
     exit 1
 fi
 
-# Find partition addresses from partition table
-echo "[2/3] Reading partition addresses..."
+# Assemble the image list
+echo "[2/3] Collecting flash images..."
 
 # ESP32-C3/C6 typically use:
 # - Bootloader: 0x0000
@@ -64,13 +71,44 @@ BOOTLOADER_ADDR="0x0000"
 PARTITIONS_ADDR="0x8000"
 FIRMWARE_ADDR="0x10000"
 
+PIO_OUT="$BUILD_DIR/.pio/build/$TARGET"
+
+if [ "$TARGET" = "tulx32_esp32c6" ]; then
+    # Shop TULX32: the delivered bootloader is the one with the S1 recovery
+    # check, not the framework bootloader that PlatformIO just built. Both are
+    # frozen at delivery (no USB in the field), so getting this wrong is not
+    # repairable — refuse rather than merge a plausible-looking wrong image.
+    REC_DIR="$BUILD_DIR/tulx32_recovery"
+    BOOT_APP0="$HOME/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin"
+    OTADATA_ADDR="0xE000"
+    RECOVERY_ADDR="0x2B0000"
+
+    for f in "$REC_DIR/bootloader.bin" "$REC_DIR/tulx32_recovery.bin" "$BOOT_APP0"; do
+        [ -f "$f" ] || { echo "[Error] missing $f"; exit 1; }
+    done
+
+    IMAGES=(
+        "${BOOTLOADER_ADDR}" "$REC_DIR/bootloader.bin"
+        "${PARTITIONS_ADDR}" "$PIO_OUT/partitions.bin"
+        "${OTADATA_ADDR}"    "$BOOT_APP0"
+        "${FIRMWARE_ADDR}"   "$PIO_OUT/firmware.bin"
+        "${RECOVERY_ADDR}"   "$REC_DIR/tulx32_recovery.bin"
+    )
+    echo "      recovery bootloader: $REC_DIR/bootloader.bin"
+    echo "      recovery app @ $RECOVERY_ADDR, otadata @ $OTADATA_ADDR -> ota_0"
+else
+    IMAGES=(
+        "${BOOTLOADER_ADDR}" "$PIO_OUT/bootloader.bin"
+        "${PARTITIONS_ADDR}" "$PIO_OUT/partitions.bin"
+        "${FIRMWARE_ADDR}"   "$PIO_OUT/firmware.bin"
+    )
+fi
+
 # Create factory binary
 echo "[3/3] Creating factory binary..."
 $ESPTOOL_CMD --chip $CHIP merge-bin \
     -o "$BINARIES_DIR/factory_${TARGET}.bin" \
-    "${BOOTLOADER_ADDR}" "$BUILD_DIR/.pio/build/$TARGET/bootloader.bin" \
-    "${PARTITIONS_ADDR}" "$BUILD_DIR/.pio/build/$TARGET/partitions.bin" \
-    "${FIRMWARE_ADDR}" "$BUILD_DIR/.pio/build/$TARGET/firmware.bin"
+    "${IMAGES[@]}"
 
 # Verify output
 if [ -f "$BINARIES_DIR/factory_${TARGET}.bin" ]; then
@@ -80,11 +118,20 @@ if [ -f "$BINARIES_DIR/factory_${TARGET}.bin" ]; then
     echo "Factory binary: $BINARIES_DIR/factory_${TARGET}.bin"
     echo "Size: $SIZE bytes"
     echo ""
-    echo "Flash via ESP WebFlashTools:"
-    echo "  1. Open https://espressif.github.io/esp-webflasher/"
-    echo "  2. Connect your TUL/TUL32 USB stick"
-    echo "  3. Select the factory binary and flash"
-    echo ""
+    if [ "$TARGET" = "tulx32_esp32c6" ]; then
+        echo "TULX32 image — flash on the test bench over the debug adapter:"
+        echo "  esptool --chip esp32c6 -p <port> write-flash 0x0 \\"
+        echo "      $BINARIES_DIR/factory_${TARGET}.bin"
+        echo ""
+        echo "Contains the recovery system. Do NOT flash this onto a TUL32."
+        echo ""
+    else
+        echo "Flash via ESP WebFlashTools:"
+        echo "  1. Open https://espressif.github.io/esp-webflasher/"
+        echo "  2. Connect your TUL/TUL32 USB stick"
+        echo "  3. Select the factory binary and flash"
+        echo ""
+    fi
 else
     echo "[Error] Failed to create factory binary"
     exit 1

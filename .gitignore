@@ -77,3 +77,6 @@ datasheet/
 # building bus — must never reach a public remote. Local working-tree only.
 SECURITY_REVIEW*.md
 security/
+
+# TULX32 recovery binaries: built outside this repository, publishing them is undecided
+tul-knx-gateway/tulx32_recovery/
