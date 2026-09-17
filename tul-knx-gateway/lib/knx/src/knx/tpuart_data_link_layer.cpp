@@ -91,10 +91,18 @@ void TpUartDataLinkLayer::requestBusy(bool state)
 
 void TpUartDataLinkLayer::monitor()
 {
+#if MASK_VERSION == 0x091A
+    // A device advertising the ROUTING service family must not offer a bus monitor
+    // (03_08_04 2.2.4), and in this stack the ROUTING DIB goes out under mask 091A.
+    // Refusing here rather than at the callers keeps a future one from reopening the
+    // path — the monitor takes the transceiver away from the coupler.
+    return;
+#else
     if (!_initialized)
         return;
 
     _tpuart.startMonitoring();
+#endif
 }
 
 void TpUartDataLinkLayer::initialize()

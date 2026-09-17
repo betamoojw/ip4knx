@@ -908,6 +908,19 @@ void IpDataLinkLayer::loopHandleConnectRequest(uint8_t* buffer, uint16_t length,
 
 
     KnxIpConnectResponse connRes(_ipParameters, tun->IndividualAddress, 3671, tun->ChannelId, connRequest.cri().type());
+
+    // Route back (03_08_02 8.6.2.2): a client behind NAT or a VPN sends a
+    // CONNECT_REQUEST whose data endpoint HPAI is all zeroes, because it cannot know
+    // which address the server would have to answer to. The reply must not push an
+    // address back at it either — filling in our own address hands such a client one
+    // it cannot reach. Only the fully zeroed HPAI counts: an HPAI with just the
+    // address or just the port at zero is invalid, not a route-back request.
+    if (connRequest.hpaiData().ipAddress() == 0 && connRequest.hpaiData().ipPortNumber() == 0)
+    {
+        connRes.controlEndpoint().ipAddress(0);
+        connRes.controlEndpoint().ipPortNumber(0);
+    }
+
     _platform.sendBytesUniCast(tun->IpAddress, tun->PortCtrl, connRes.data(), connRes.totalLength());
 }
 
