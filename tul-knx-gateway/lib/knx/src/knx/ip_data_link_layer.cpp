@@ -1163,8 +1163,10 @@ void IpDataLinkLayer::enabled(bool value)
 //    _println(_deviceObject.individualAddress());
     if (value && !_enabled)
     {
-        _platform.setupMultiCast(_ipParameters.propertyValue<uint32_t>(PID_ROUTING_MULTICAST_ADDRESS), KNXIP_MULTICAST_PORT);
-        _enabled = true;
+        // enabled() must not claim an endpoint the join did not produce: a device
+        // that keeps link and address but never joined answers no SEARCH_REQUEST,
+        // while status page and LED report a healthy gateway.
+        _enabled = _platform.setupMultiCast(_ipParameters.propertyValue<uint32_t>(PID_ROUTING_MULTICAST_ADDRESS), KNXIP_MULTICAST_PORT);
         return;
     }
 

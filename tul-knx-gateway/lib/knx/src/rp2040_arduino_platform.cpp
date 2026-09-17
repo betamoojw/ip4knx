@@ -241,7 +241,7 @@ void RP2040ArduinoPlatform::macAddress(uint8_t* addr)
 }
 
 // multicast
-void RP2040ArduinoPlatform::setupMultiCast(uint32_t addr, uint16_t port)
+bool RP2040ArduinoPlatform::setupMultiCast(uint32_t addr, uint16_t port)
 {
     mcastaddr = IPAddress(htonl(addr));
     println("Initializing KNX multicast.");
@@ -252,7 +252,6 @@ void RP2040ArduinoPlatform::setupMultiCast(uint32_t addr, uint16_t port)
     
     _port = port;
     uint8_t result = _udp.beginMulticast(mcastaddr, port);
-    (void)result;
 
 #ifdef KNX_IP_GENERIC
 // if(!_unicast_socket_setup)
@@ -265,6 +264,8 @@ void RP2040ArduinoPlatform::setupMultiCast(uint32_t addr, uint16_t port)
     // print(port);
     // print(" result ");
     // println(result);
+
+    return result != 0;
 }
 
 void RP2040ArduinoPlatform::closeMultiCast()

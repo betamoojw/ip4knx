@@ -99,8 +99,10 @@ uint32_t Platform::uniqueSerialNumber()
     return 0x01020304;
 }
 
-void Platform::setupMultiCast(uint32_t addr, uint16_t port)
-{}
+bool Platform::setupMultiCast(uint32_t addr, uint16_t port)
+{
+    return false; // no IP stack in the base platform
+}
 
 void Platform::closeMultiCast()
 {}

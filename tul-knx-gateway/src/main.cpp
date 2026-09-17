@@ -1817,19 +1817,32 @@ void setup() {
     }
 }
 
-#ifdef W5500_ETH
 // Re-arm the KNXnet/IP routing group on whatever interface carries us now.
 // enabled(false/true) is closeMultiCast() + setupMultiCast() on the IP data
 // link layer; only call it when an interface is actually up (see loop()).
+//
+// Not only for the ethernet build: a multicast membership belongs to the
+// interface that held it, and it does not survive that interface going down and
+// coming back. Without this the gateway keeps link and address after the network
+// returns, reports a healthy state, and answers no SEARCH_REQUEST until someone
+// power-cycles it.
 static void knxRejoinRouting(const char* why) {
     auto ipDl = ((Bau091A&)knx.bau()).getPrimaryDataLinkLayer();
-    if (ipDl && ipDl->enabled()) {
-        Serial.printf("KNX: rejoining routing group on %s\n", why);
-        ipDl->enabled(false);
+    if (!ipDl)
+        return;
+
+    if (!ipDl->enabled()) {
+        // No endpoint at all, including a join that failed at boot or on the
+        // previous attempt. Opening it is exactly what is missing then.
+        Serial.printf("KNX: opening routing group on %s\n", why);
         ipDl->enabled(true);
+        return;
     }
+
+    Serial.printf("KNX: rejoining routing group on %s\n", why);
+    ipDl->enabled(false);
+    ipDl->enabled(true);
 }
-#endif
 
 uint32_t lastWifiCheck = 0;
 bool wasConnected = true;
@@ -2255,6 +2268,12 @@ void loop() {
                 digitalWrite(KNX_LED, LOW); // LED ON (Active Low)
                 wifiDownSince = 0;
                 lastReconnectKick = 0;
+                // The STA netif went down and came back, so the multicast
+                // membership that lived on it is gone. Re-arm it here, where the
+                // interface is up and has an address — the block above only runs
+                // while WiFi carries the gateway, so this never fights the
+                // ethernet route change.
+                knxRejoinRouting("wifi reconnect");
             } else {
                 Serial.printf("WARNING: WiFi link down (assoc=%d ip=%d) - watchdog active\n",
                               associated, hasIp);
