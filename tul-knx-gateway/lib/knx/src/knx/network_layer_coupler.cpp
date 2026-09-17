@@ -249,9 +249,18 @@ bool NetworkLayerCoupler::isRoutedIndividualAddress(uint16_t individualAddress, 
     }
 }
 
-void NetworkLayerCoupler::sendMsgHopCount(AckType ack, AddressType addrType, uint16_t destination, NPDU& npdu, Priority priority,
+void NetworkLayerCoupler::sendMsgHopCount(AckType ack, AddressType addrType, uint16_t destination, NPDU& npduIn, Priority priority,
                                           SystemBroadcast broadcastType, uint8_t sourceInterfaceIndex, uint16_t source)
 {
+    // Route from a copy. The caller's frame belongs to the receive path and can still
+    // be used after this returns: dataRequestFromTunnel hands the same object to the
+    // local stack and then to the line, so decrementing the hop count and setting the
+    // repeat flag for the OTHER medium here changed what the incoming side
+    // transmitted. The copy lives until the send below has serialized it, which every
+    // medium does before returning. (upstream 1eb9a0f)
+    CemiFrame outFrame(npduIn.frame());
+    NPDU& npdu = outFrame.npdu();
+
     uint8_t interfaceIndex = (sourceInterfaceIndex == kSecondaryIfIndex) ? kPrimaryIfIndex : kSecondaryIfIndex;
 
     uint8_t lcconfig = LCCONFIG::PHYS_FRAME_ROUT | LCCONFIG::PHYS_REPEAT | LCCONFIG::BROADCAST_REPEAT | LCCONFIG::GROUP_IACK_ROUT | LCCONFIG::PHYS_IACK_NORMAL; // default value from spec. in case prop is not availible.
