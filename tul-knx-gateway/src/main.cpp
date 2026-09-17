@@ -1957,6 +1957,23 @@ void loop() {
     }
 #endif
 
+    // Keep the routing group alive in networks where nobody asks. A switch or
+    // access point that snoops IGMP ages its table out after a few minutes and
+    // relies on a querier to refresh it; in a network without one — which is what
+    // most homes and small installations are — multicast to this device simply
+    // stops, while link, address and status page stay healthy. Measured in the lab:
+    // the group was gone minutes after boot and a single query brought it back.
+    // Two minutes is comfortably inside the usual aging time, and costs one small
+    // packet. Not a leave-and-join: that would prune the group for the moment it
+    // takes to come back.
+    static unsigned long lastMcastRefresh = 0;
+    if (millis() - lastMcastRefresh > 120000UL) {
+        lastMcastRefresh = millis();
+        auto ipDl = ((Bau091A&)knx.bau()).getPrimaryDataLinkLayer();
+        if (ipDl)
+            ipDl->refreshMultiCast();
+    }
+
     // Track the NCN link so /api/status reports what is true now, not what was
     // true at boot. Without this a stick that started with no bus attached kept
     // reporting the boot FAIL after the stack had already reconnected itself.

@@ -20,6 +20,8 @@ class IpDataLinkLayer : public DataLinkLayer
     void loop();
     void enabled(bool value);
     bool enabled() const;
+    // Re-announce the joined group without leaving it (see Platform::refreshMultiCast).
+    void refreshMultiCast();
     void knxBusConnected(bool connected);  // Set KNX bus connection status
     DptMedium mediumType() const override;
 #ifdef KNX_TUNNELING

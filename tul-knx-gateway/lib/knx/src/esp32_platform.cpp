@@ -5,6 +5,8 @@
 #include <EEPROM.h>
 
 #include "knx/bits.h"
+#include "lwip/igmp.h"
+#include "esp_netif_net_stack.h"
 
 // #ifndef KNX_SERIAL
 //     #define KNX_SERIAL Serial1
@@ -116,6 +118,38 @@ bool Esp32Platform::setupMultiCast(uint32_t addr, uint16_t port)
 
     return result != 0;
     // KNX_DEBUG_SERIAL.printf("result %d\n", result);
+}
+
+// Re-send the IGMP membership reports for this interface. Deliberately not a
+// leave-and-join: the leave prunes the group at the switch for the moment it takes
+// to come back, and routing telegrams in that window are lost. lwIP's
+// igmp_joingroup on a group already joined only raises its use count and sends
+// nothing, so the report has to be asked for directly. It runs in the TCP/IP task,
+// which is where the lwIP core lock lives.
+static esp_err_t knxRefreshIgmpReports(void* ctx)
+{
+    igmp_report_groups((struct netif*)ctx);
+    return ESP_OK;
+}
+
+void Esp32Platform::refreshMultiCast()
+{
+#if defined(KNX_IP_LAN)
+    esp_netif_t* netif = esp_netif_get_handle_from_ifkey("ETH_DEF");
+#elif defined(W5500_ETH)
+    esp_netif_t* netif = esp_netif_get_handle_from_ifkey(
+                             knxUseEthernet() ? "ETH_DEF" : "WIFI_STA_DEF");
+#else
+    esp_netif_t* netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+#endif
+    if (netif == nullptr)
+        return;
+
+    struct netif* stack_netif = (struct netif*)esp_netif_get_netif_impl(netif);
+    if (stack_netif == nullptr)
+        return;
+
+    esp_netif_tcpip_exec(knxRefreshIgmpReports, stack_netif);
 }
 
 void Esp32Platform::closeMultiCast()

@@ -1179,6 +1179,12 @@ void IpDataLinkLayer::loopHandleTunnelingRequest(uint8_t* buffer, uint16_t lengt
 }
 #endif
 
+void IpDataLinkLayer::refreshMultiCast()
+{
+    if (_enabled)
+        _platform.refreshMultiCast();
+}
+
 void IpDataLinkLayer::enabled(bool value)
 {
 //    _print("own address: ");
