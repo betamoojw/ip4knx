@@ -52,10 +52,10 @@ Diagnostic and bidirectional test tool for KNX/IP communication. Supports testin
 
 ```bash
 # Diagnostic mode - test connectivity only
-python3 test_knx_ip_bidirectional.py --diagnose 10.10.11.199
+python3 test_knx_ip_bidirectional.py --diagnose 192.0.2.20
 
 # Monitor routing indications (multicast from gateway)
-python3 test_knx_ip_bidirectional.py --monitor ip:10.10.11.199
+python3 test_knx_ip_bidirectional.py --monitor ip:192.0.2.20
 
 # Send KNX telegram via Home Assistant
 python3 test_knx_ip_bidirectional.py \
@@ -67,11 +67,11 @@ python3 test_knx_ip_bidirectional.py \
 python3 test_knx_ip_bidirectional.py --send /tmp/eib --address 11/2/14
 
 # Send KNX telegram via knxd (network)
-python3 test_knx_ip_bidirectional.py --send ip:10.10.11.13 --address 11/2/14
+python3 test_knx_ip_bidirectional.py --send ip:192.0.2.20 --address 11/2/14
 
 # Full bidirectional test with HASS
 python3 test_knx_ip_bidirectional.py \
-  --monitor ip:10.10.11.199 \
+  --monitor ip:192.0.2.20 \
   --hass-url http://localhost:8123 \
   --hass-token 'YOUR_TOKEN' \
   --address 11/2/14
@@ -94,13 +94,13 @@ Regression test for the KNXnet/IP tunnel source-address validation feature (KNXn
 
 ```bash
 # Default: writes 0/0/1 = 0x01, prints PASS/FAIL verdict
-python3 test_tunnel_source.py --host 10.10.11.30
+python3 test_tunnel_source.py --host 192.0.2.10
 
 # Choose another group address
-python3 test_tunnel_source.py --host 10.10.11.30 --group 1/2/3
+python3 test_tunnel_source.py --host 192.0.2.10 --group 1/2/3
 
 # Show packet trace
-python3 test_tunnel_source.py --host 10.10.11.30 --verbose
+python3 test_tunnel_source.py --host 192.0.2.10 --verbose
 ```
 
 Pass criterion: B receives the echoed L_Data.ind with `src == IA_A` (not the spoofed `IA_B`). Stdlib-only, no dependencies.

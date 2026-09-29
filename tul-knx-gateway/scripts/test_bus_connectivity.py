@@ -280,9 +280,9 @@ def main():
     ap = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--tul32", default="10.10.11.127", help="TUL32 IP")
-    ap.add_argument("--tulx32", default="10.10.11.125", help="TULX32 IP")
-    ap.add_argument("--knxd", default="10.10.11.13",
+    ap.add_argument("--tul32", required=True, help="TUL32 IP")
+    ap.add_argument("--tulx32", required=True, help="TULX32 IP")
+    ap.add_argument("--knxd", default="",
                     help="knxd IP (witness only); empty string disables")
     ap.add_argument("--ga-base", default="15/0",
                     help="GA prefix m/mid (default 15/0); sub increments per case")

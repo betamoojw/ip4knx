@@ -22,8 +22,8 @@ Coverage (per device, 11 checks):
 Plus a cross-device consistency check (firmware version match).
 
 Usage:
-    python3 scripts/pre_release_test.py --c3 10.10.11.156 --c6 10.10.11.30
-    python3 scripts/pre_release_test.py --c3 10.10.11.156 --c6 10.10.11.30 --skip routing_indication
+    python3 scripts/pre_release_test.py --c3 192.0.2.11 --c6 192.0.2.12
+    python3 scripts/pre_release_test.py --c3 192.0.2.11 --c6 192.0.2.12 --skip routing_indication
 
 Exit codes:
     0  all PASS (release-ready)

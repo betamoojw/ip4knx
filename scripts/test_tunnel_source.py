@@ -18,8 +18,8 @@ FAIL criteria:
   - No echo is observed within the timeout window
 
 Usage:
-    python3 test_tunnel_source.py --host 10.10.11.30
-    python3 test_tunnel_source.py --host 10.10.11.30 --group 1/2/3 --verbose
+    python3 test_tunnel_source.py --host 192.0.2.10
+    python3 test_tunnel_source.py --host 192.0.2.10 --group 1/2/3 --verbose
 """
 
 import argparse
@@ -307,7 +307,7 @@ def run(host, group_ga, verbose):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--host", required=True, help="gateway IP (e.g. 10.10.11.30)")
+    ap.add_argument("--host", required=True, help="gateway IP (e.g. 192.0.2.10)")
     ap.add_argument("--group", default="0/0/1", help="group address to write to (default 0/0/1)")
     ap.add_argument("--verbose", "-v", action="store_true", help="trace packets")
     args = ap.parse_args()

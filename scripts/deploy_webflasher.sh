@@ -19,8 +19,9 @@
 # ESP32-C6 — a second entry would just shadow the first. Shop TULX32 boards are
 # flashed on the test bench over the debug adapter (build_factory.sh), not from
 # this page. Do not "fix" this by adding a build here.
-# Default target:
-#   10.10.22.1:/var/www/install/ip4knx/   →  https://install.busware.de/ip4knx/
+# Default target: $WEBFLASHER_TARGET (rsync destination of
+# https://install.busware.de/ip4knx/), read from the environment or from the
+# untracked file .env.deploy in the project root.
 #
 # Usage:
 #   ./scripts/deploy_webflasher.sh                # build + rsync to default host
@@ -37,7 +38,9 @@ BINARIES_DIR="$PROJECT_DIR/binaries"
 BUILD_DIR="$PROJECT_DIR/tul-knx-gateway/.pio/build"
 STAGE_DIR="$PROJECT_DIR/webflasher"
 
-TARGET="${1:-10.10.22.1:/var/www/install/ip4knx/}"
+[ -f "$PROJECT_DIR/.env.deploy" ] && . "$PROJECT_DIR/.env.deploy"
+TARGET="${1:-$WEBFLASHER_TARGET}"
+[ -n "$TARGET" ] || { echo "ERROR: no target — pass <user@host:/path/> or set WEBFLASHER_TARGET (.env.deploy)"; exit 1; }
 
 # --- Sanity ----------------------------------------------------------------
 for f in "$TEMPLATES_DIR/index.html" "$TEMPLATES_DIR/manifest.json" "$TEMPLATES_DIR/busware.png"; do

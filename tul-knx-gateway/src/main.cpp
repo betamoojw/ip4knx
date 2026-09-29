@@ -118,7 +118,7 @@ static ActiveIf currentActiveIf() {
 static bool applyBuswareEthMac() {
     // Read the 48-bit field straight out of BLOCK3. esp_efuse_mac_get_custom()
     // is the wrong door on the C6: it hands back the first six bytes of the
-    // EUI-64 form, so a4:50:55:02:00:01 comes out as a4:50:55:ff:fe:02.
+    // EUI-64 form, so aa:bb:cc:dd:ee:ff comes out as aa:bb:cc:ff:fe:dd.
     uint8_t mac[6] = {0};
     if (esp_efuse_read_field_blob(ESP_EFUSE_USER_DATA_MAC_CUSTOM, mac, 48) != ESP_OK) {
         return false;

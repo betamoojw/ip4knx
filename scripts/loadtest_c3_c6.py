@@ -28,7 +28,7 @@ NFS) consumed by scripts/release.sh and .git/hooks/pre-push:
     tul-knx-gateway/.loadtest_pass.json      (gitignored — holds lab MAC/IP)
 
 Usage:
-    python3 scripts/loadtest_c3_c6.py --c3 10.10.11.156 --c6 10.10.11.30
+    python3 scripts/loadtest_c3_c6.py --c3 192.0.2.11 --c6 192.0.2.12
     python3 scripts/loadtest_c3_c6.py --c3 ... --c6 ... --tunnels 3
     python3 scripts/loadtest_c3_c6.py --c3 ... --c6 ... --no-write   # report only
 

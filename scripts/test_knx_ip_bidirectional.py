@@ -8,7 +8,7 @@ Tests both directions:
 
 Usage:
     # Monitor routing indications from ip4knx gateway
-    python3 test_knx_ip_bidirectional.py --monitor ip:10.10.11.199
+    python3 test_knx_ip_bidirectional.py --monitor ip:192.0.2.20
 
     # Send KNX telegram via HASS
     python3 test_knx_ip_bidirectional.py --hass-url http://localhost:8123 \\
@@ -18,7 +18,7 @@ Usage:
     python3 test_knx_ip_bidirectional.py --send /tmp/eib --address 1/2/3
 
     # Full bidirectional test with HASS
-    python3 test_knx_ip_bidirectional.py --monitor ip:10.10.11.199 \\
+    python3 test_knx_ip_bidirectional.py --monitor ip:192.0.2.20 \\
          --hass-url http://localhost:8123 --hass-token 'TOKEN'
 
     # Monitor KNX bus via knxd
@@ -131,7 +131,7 @@ def send_knx_telegram(knxd_url: str, group_addr: str, value: int = 1) -> bool:
     Send KNX telegram via knxd using knxtool groupwrite.
 
     knxd_url can be:
-      - ip:10.10.11.13 (network)
+      - ip:192.0.2.20 (network)
       - local:/tmp/eib (UNIX socket)
 
     Returns True on success.
@@ -322,16 +322,16 @@ def main():
         epilog="""
 Examples:
   # Monitor routing indications from ip4knx gateway
-  python3 test_knx_ip_bidirectional.py --monitor ip:10.10.11.199
+  python3 test_knx_ip_bidirectional.py --monitor ip:192.0.2.20
 
   # Send telegram via knxd (UNIX socket)
   python3 test_knx_ip_bidirectional.py --send /tmp/eib --address 1/2/3
 
   # Send telegram via knxd (network)
-  python3 test_knx_ip_bidirectional.py --send ip:10.10.11.13 --address 1/2/3
+  python3 test_knx_ip_bidirectional.py --send ip:192.0.2.20 --address 1/2/3
 
   # Full bidirectional test
-  python3 test_knx_ip_bidirectional.py --monitor ip:10.10.11.199 --hass-url http://localhost:8123 \\
+  python3 test_knx_ip_bidirectional.py --monitor ip:192.0.2.20 --hass-url http://localhost:8123 \\
          --hass-token 'YOUR_TOKEN'
 
   # Send via HASS
@@ -342,7 +342,7 @@ Examples:
   python3 test_knx_ip_bidirectional.py --busmonitor /tmp/eib
 
   # Diagnostic: Test connectivity only
-  python3 test_knx_ip_bidirectional.py --diagnose ip:10.10.11.199
+  python3 test_knx_ip_bidirectional.py --diagnose ip:192.0.2.20
         """
     )
 
@@ -355,9 +355,9 @@ Examples:
     parser.add_argument('--hass-token', default=None,
                         help='Home Assistant long-lived access token')
     parser.add_argument('--send', default=None,
-                        help='knxd URL (e.g., ip:10.10.11.13 or local:/tmp/eib or /tmp/eib)')
+                        help='knxd URL (e.g., ip:192.0.2.20 or local:/tmp/eib or /tmp/eib)')
     parser.add_argument('--busmonitor', default=None,
-                        help='knxd URL for bus monitoring (e.g., ip:10.10.11.13 or local:/tmp/eib)')
+                        help='knxd URL for bus monitoring (e.g., ip:192.0.2.20 or local:/tmp/eib)')
     parser.add_argument('--address', default='1/2/3',
                         help='KNX group address (default: 1/2/3)')
     parser.add_argument('--value', type=int, default=1,
