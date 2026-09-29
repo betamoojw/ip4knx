@@ -49,7 +49,7 @@ from test_tunnel_source import (  # noqa: E402
     TunClient, build_cemi_group_write, build_tunneling_request,
     build_header, build_hpai, build_disconnect_request, build_tunneling_ack,
     parse_header, parse_cemi_src_dst,
-    group_to_int, int_to_group, int_to_ia,
+    group_to_int, int_to_group, int_to_ia, ia_to_int,
     CONNECT_REQUEST, CONNECT_RESPONSE, TUNNELING_REQUEST, TUNNELING_ACK,
     DEVCFG_REQUEST, DEVCFG_ACK,
     DISCONNECT_REQUEST, CEMI_LDATA_IND, CEMI_LDATA_REQ,
@@ -58,8 +58,12 @@ from test_tunnel_source import (  # noqa: E402
 
 CEMI_M_PROPREAD_REQ = 0xFC
 CEMI_M_PROPREAD_CON = 0xFB
+CEMI_M_PROPWRITE_REQ = 0xF6
+CEMI_M_PROPWRITE_CON = 0xF5
 OT_DEVICE = 0
 OT_ROUTER = 6
+OT_IP_PARAMETER = 11
+PID_ADDITIONAL_INDIVIDUAL_ADDRESSES = 53
 PID_SERIAL_NUMBER = 11
 PID_MAX_APDU_LENGTH_ROUTER = 58
 
@@ -233,6 +237,78 @@ def t_tunnel_pool_full(dev: Device):
         for c in clients:
             try: c.disconnect()
             except Exception: pass
+        time.sleep(0.5)
+
+
+def devmgmt_prop(c: "DevMgmtClient", msg_req: int, msg_con: int, obj: int, pid: int,
+                 count: int, data: bytes = b"") -> Optional[bytes]:
+    c.cemi_raw.clear()
+    c.send_devcfg(struct.pack(">BHBBBB", msg_req, obj, 1, pid, (count & 0xF) << 4, 1) + data)
+    deadline = time.time() + 1.5
+    while time.time() < deadline:
+        for m in c.cemi_raw:
+            if m[0] == msg_con:
+                return bytes(m[1])
+        time.sleep(0.05)
+    return None
+
+
+@timed
+def t_tunnel_pool_written(dev: Device):
+    # A pool written through device management with a gap at the start, the
+    # line's x.y.0 and empty entries: tunnels get the usable addresses wherever
+    # they stand, then E_NO_MORE_UNIQUE_CONNECTIONS (0x25), and a device
+    # management connection still connects because it takes no address
+    # (08_TSSH 5.3.1/5.3.2, upstream ce26d6e). The original pool is written back.
+    own = ia_to_int(dev.status.get("knx_pa", "15.15.0"))
+    line = own & 0xFF00
+    usable = [line | d for d in (243, 244) if (line | d) != own]
+    pool = [0, line] + usable + [0] * (EXPECTED_MAX_TUNNELS - 2 - len(usable))
+    dm = DevMgmtClient(dev.host, "POOL", verbose=False)
+    clients: list[TunClient] = []
+    orig = None
+    try:
+        dm.connect()
+        rd = devmgmt_prop(dm, CEMI_M_PROPREAD_REQ, CEMI_M_PROPREAD_CON, OT_IP_PARAMETER,
+                          PID_ADDITIONAL_INDIVIDUAL_ADDRESSES, EXPECTED_MAX_TUNNELS)
+        if rd is None or (rd[5] >> 4) != EXPECTED_MAX_TUNNELS or len(rd) < 7 + 2 * EXPECTED_MAX_TUNNELS:
+            return "FAIL", f"cannot read the tunnel pool: {rd.hex() if rd else None}"
+        orig = rd[7:7 + 2 * EXPECTED_MAX_TUNNELS]
+        con = devmgmt_prop(dm, CEMI_M_PROPWRITE_REQ, CEMI_M_PROPWRITE_CON, OT_IP_PARAMETER,
+                           PID_ADDITIONAL_INDIVIDUAL_ADDRESSES, EXPECTED_MAX_TUNNELS,
+                           b"".join(struct.pack(">H", a) for a in pool))
+        if con is None or (con[5] >> 4) != EXPECTED_MAX_TUNNELS:
+            orig = None     # nothing was written, nothing to restore
+            return "FAIL", f"pool write refused: {con.hex() if con else None}"
+        got = []
+        for i in range(len(usable) + 1):
+            c = TunClient(dev.host, f"W{i}", verbose=False)
+            try:
+                c.connect()
+                clients.append(c)
+                got.append(int_to_ia(c.assigned_ia))
+            except RuntimeError as e:
+                got.append("status=" + str(e).split("status=")[-1])
+        want = [int_to_ia(a) for a in usable] + ["status=0x25"]
+        if got != want:
+            return "FAIL", f"tunnels {got}, expected {want}"
+        dm2 = DevMgmtClient(dev.host, "POOL2", verbose=False)
+        try:
+            dm2.connect()
+        except RuntimeError as e:
+            return "FAIL", f"device management refused while the pool is used up: {e}"
+        dm2.disconnect()
+        return "PASS", f"tunnels {got[:-1]}, then 0x25; device management connects"
+    finally:
+        for c in clients:
+            try: c.disconnect()
+            except Exception: pass
+        if orig is not None:
+            con = devmgmt_prop(dm, CEMI_M_PROPWRITE_REQ, CEMI_M_PROPWRITE_CON, OT_IP_PARAMETER,
+                               PID_ADDITIONAL_INDIVIDUAL_ADDRESSES, EXPECTED_MAX_TUNNELS, orig)
+            if con is None or (con[5] >> 4) != EXPECTED_MAX_TUNNELS:
+                print(f"  !! original tunnel pool NOT restored ({orig.hex()})")
+        dm.disconnect()
         time.sleep(0.5)
 
 
@@ -538,6 +614,7 @@ ALL_TESTS = [
     ("progmode_toggle",       t_progmode_toggle),
     ("ota_query",             t_ota_query),
     ("tunnel_pool_full",      t_tunnel_pool_full),
+    ("tunnel_pool_written",   t_tunnel_pool_written),
     ("source_validation",     t_source_validation),
     ("cemi_devmgmt_roundtrip", t_cemi_devmgmt_roundtrip),
     ("apdu_length_router",    t_apdu_length_router),
