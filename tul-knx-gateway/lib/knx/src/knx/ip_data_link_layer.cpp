@@ -1211,6 +1211,14 @@ void IpDataLinkLayer::loopHandleTunnelingRequest(uint8_t* buffer, uint16_t lengt
 
     tun->SequenceCounter_R = tunnReq.connectionHeader().sequenceCounter();
 
+    // A device management connection has no tunnel address to send under: its
+    // connect response carries none.
+    if (tun->IsConfig && tunnReq.frame().messageCode() == L_data_req)
+    {
+        println("L_Data.req on a device management connection -> ignored");
+        return;
+    }
+
     // Tunnel source: 03_08_04 (Tunnelling v01.07.01, p.7) has the server fill in
     // the assigned IA for source 0x0000 and send any other source unchanged. We
     // deliberately rewrite any other source too: a client must not send under
