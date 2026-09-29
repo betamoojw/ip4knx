@@ -1,6 +1,6 @@
 # ip4knx - Universal KNXnet/IP Gateway
 
-Custom firmware to turn the **[Busware TUL](https://shop.busware.de/tul) (ESP32-C3)** and **TUL32 (ESP32-C6)** USB sticks into a fully featured KNXnet/IP Routing and Tunneling Gateway.
+Custom firmware to turn the busware **TUL** (ESP32-C3) and **TUL32** (ESP32-C6) USB sticks and the bus-powered **TULX32** (ESP32-C6) into a fully featured KNXnet/IP Routing and Tunneling Gateway.
 
 Built upon the excellent [OpenKNX](https://github.com/OpenKNX/knx) stack, highly optimized and patched for the specific hardware requirements of the NCN5130 transceiver and modern ESP32 Arduino Core 3.x frameworks.
 
@@ -14,7 +14,7 @@ Built upon the excellent [OpenKNX](https://github.com/OpenKNX/knx) stack, highly
 *   **Installer Mode (Captive Portal):** If no Wi-Fi credentials exist, the device immediately broadcasts an open Access Point (`TUL AP <MAC>`). Connecting to this network triggers a Captive Portal, instantly redirecting your smartphone or laptop to the built-in configuration dashboard. A gateway that is already carried by an ethernet cable stays off the air and does not open this AP.
 *   **Web-Based Wi-Fi Setup:** Click the status badge in the web dashboard to open the Wi-Fi configuration modal. Perform a live scan of nearby networks, select your SSID, and enter the password. The gateway will save the credentials and seamlessly reboot into client mode.
 *   **Improv-WiFi Provisioning:** Alternatively, connect via Serial (USB) and provision Wi-Fi credentials straight from your browser. ImprovSerial runs concurrently during the first 120 seconds after boot. First-time provisioning is reliable even while the captive AP is broadcasting — the strongest matching access point is selected without a forced radio channel that would otherwise break the WPA2 handshake in the AP+STA window.
-*   **OTA Firmware Update:** Two paths, both with MD5 verification: (a) **online update** from a signed manifest at [install.busware.de/ip4knx/](https://install.busware.de/ip4knx/) — one click in the dashboard pulls the latest firmware over HTTPS; (b) **manual upload** of any `firmware_*.bin` through the same dashboard.
+*   **OTA Firmware Update:** Two paths, both with MD5 verification: (a) **online update** from the manifest at [install.busware.de/ip4knx/](https://install.busware.de/ip4knx/) — one click in the dashboard pulls the latest firmware over HTTPS; (b) **manual upload** of any `firmware_*.bin` through the same dashboard. Both apply to the TUL and TUL32; the TULX32 installs firmware through its recovery system (see Supported Hardware).
 *   **Dual-OTA Anti-Brick:** Two app partitions plus bootloader app-rollback. A freshly OTA'd partition stays `PENDING_VERIFY` for the first 30 s; if the new firmware crashes before then, the bootloader falls back to the previous partition on next boot.
 *   **Programming Mode Toggle:** One-click ETS programming-mode activation from the dashboard / `/api/progmode` (no more reaching for the physical button during commissioning).
 *   **NCN5130 Boot Self-Test:** Verifies the SPI/UART link to the transceiver, all power rails (V20V/VDD2/VBUS/VFILT), XTAL, and thermal status on every boot. Visible on the dashboard and in `/api/status`.
@@ -27,7 +27,7 @@ Built upon the excellent [OpenKNX](https://github.com/OpenKNX/knx) stack, highly
 ## 🎛 Supported Hardware
 
 ### Busware TUL (ESP32-C3)
-*   **Shop:** [shop.busware.de/tul](https://shop.busware.de/tul)
+*   **Shop:** the TUL sold in the shop today carries an ESP32-C6 — that is the TUL32 below
 *   **MCU:** ESP32-C3
 *   **Transceiver:** NCN5130 (Galvanically isolated via ISO7221)
 *   **Flash:** 4MB
@@ -35,13 +35,25 @@ Built upon the excellent [OpenKNX](https://github.com/OpenKNX/knx) stack, highly
 *   **Pins:** LED=4, Button=9, RX=20, TX=21 (UART_NUM_1)
 
 ### Busware TUL32 (ESP32-C6)
+*   **Shop:** [shop.busware.de/tul](https://shop.busware.de/tul) — sold as "TUL" with ESP32-C6; ethernet and PoE are order options
 *   **MCU:** ESP32-C6-MINI-1-N4
 *   **Transceiver:** NCN5130 (Galvanically isolated via ISO7221)
 *   **Flash:** 4MB
 *   **Target Env:** `tul32_esp32c6`
 *   **Pins:** LED=8, Button=9, RX=5, TX=4 (UART_NUM_1)
 *   **Optional:** FPC header for a W5500 ethernet module (see Features)
-*   **Partition layout:** `partitions_4mb_ota.csv` (otadata + app0 0x10000/0x1F0000 + app1 0x200000/0x1F0000 + coredump). Same layout is used for both ESP32-C3 and ESP32-C6.
+*   **Partition layout:** `partitions_4mb_ota.csv` (otadata + app0 0x10000/0x1F0000 + app1 0x200000/0x1F0000 + coredump). Same layout for the TUL and the TUL32.
+
+### Busware TULX32 (ESP32-C6, bus-powered)
+*   **Shop:** [TULX – bus-powered TPUART module](https://shop.busware.de/product_info.php?products_id=11)
+*   **MCU:** ESP32-C6
+*   **Transceiver:** NCN5130; the board runs from the KNX bus and has no USB port
+*   **Flash:** 4MB
+*   **Target Env:** `tulx32_esp32c6`
+*   **Pins:** LED=8, Button=14 (S1), RX=5, TX=4 (UART_NUM_1); console on UART0 via service header J1
+*   **Power budget:** Wi-Fi TX power capped at 18 dBm, brownout detector disabled
+*   **Partition layout:** `partitions_tulx32_recovery.csv` — one application slot (`ota_0`) plus a recovery system in `factory`, fixed at delivery
+*   **Installation:** not from the web flasher; the recovery system installs the image over the network, see **https://install.busware.de/tulx/**. Updates go the same way: the dashboard's *Restart into Recovery* button, then *Check online* in the recovery; the in-app OTA endpoints refuse with 409 on this layout.
 
 ## 🚀 Installation
 
@@ -50,7 +62,7 @@ The hosted web flasher detects your hardware and flashes the factory image direc
 
 → **https://install.busware.de/ip4knx/**
 
-Works in Chrome, Edge, and Opera (browsers with Web Serial API). Plug in the stick, hit *Install*, the page chips through factory image + Wi-Fi provisioning (Improv) in one flow. After a subsequent firmware bump, the same page can be used to update existing devices (or use the in-device OTA — see Features above).
+Works in Chrome, Edge, and Opera (browsers with Web Serial API) for the TUL and TUL32; the TULX32 has no USB port and is installed through its recovery (see Supported Hardware). Plug in the stick, hit *Install*, the page walks you through factory image + Wi-Fi provisioning (Improv) in one flow. After a subsequent firmware bump, the same page can update existing devices, but it resets their stored settings (Wi-Fi and KNX configuration); the in-device online update keeps them (see Features above).
 
 ### Option B: Local `esptool.py`
 The `binaries/` directory is intentionally empty in a fresh checkout — factory images are build artifacts, not source. Generate one first and flash it:
