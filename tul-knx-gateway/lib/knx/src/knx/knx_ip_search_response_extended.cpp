@@ -162,6 +162,9 @@ void KnxIpSearchResponseExtended::setTunnelingInfo(IpParameterObject& parameters
             flags |= 1; //Slot is not free
         }
 
+        if(!IpParameterObject::isUsableTunnelAddress(deviceObject.individualAddress(), additional))
+            flags |= 1 << 2; //Slot is not usable; x.y.0 or the device's own address
+
         flags = ~flags;
 
         _tunnelInfo.tunnelingSlot(additional, flags);

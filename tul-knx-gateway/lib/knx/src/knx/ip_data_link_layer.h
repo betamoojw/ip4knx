@@ -47,6 +47,7 @@ class IpDataLinkLayer : public DataLinkLayer
     void sendFrameToTunnel(KnxIpTunnelConnection *tunnel, CemiFrame& frame);
     void loopHandleConnectRequest(uint8_t* buffer, uint16_t length, uint32_t& src_addr, uint16_t& src_port);
     bool fromTunnelPeer(const KnxIpTunnelConnection* tun, uint32_t src_addr);
+    bool tunnelAddressInUse(uint16_t pa);
     void loopHandleConnectionStateRequest(uint8_t* buffer, uint16_t length);
     void loopHandleDisconnectRequest(uint8_t* buffer, uint16_t length, uint32_t src_addr);
     void loopHandleDescriptionRequest(uint8_t* buffer, uint16_t length);

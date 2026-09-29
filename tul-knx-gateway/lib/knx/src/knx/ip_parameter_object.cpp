@@ -165,6 +165,11 @@ bool IpParameterObject::isLegacyTunnelAddresses(uint16_t ownAddress, const uint8
     }
     return true;
 }
+
+bool IpParameterObject::isUsableTunnelAddress(uint16_t ownAddress, uint16_t address)
+{
+    return (address & 0xFF) != 0 && address != ownAddress;
+}
 #endif
 
 #endif

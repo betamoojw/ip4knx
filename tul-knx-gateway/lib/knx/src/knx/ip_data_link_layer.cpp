@@ -626,6 +626,14 @@ bool IpDataLinkLayer::fromTunnelPeer(const KnxIpTunnelConnection* tun, uint32_t 
     return tun->PeerAddress == src_addr;
 }
 
+bool IpDataLinkLayer::tunnelAddressInUse(uint16_t pa)
+{
+    for(int x = 0; x < KNX_TUNNELING; x++)
+        if(tunnels[x].ChannelId != 0 && tunnels[x].IndividualAddress == pa)
+            return true;
+    return false;
+}
+
 void IpDataLinkLayer::loopHandleConnectRequest(uint8_t* buffer, uint16_t length, uint32_t& src_addr, uint16_t& src_port)
 {
     KnxIpConnectRequest connRequest(buffer, length);
@@ -715,9 +723,14 @@ void IpDataLinkLayer::loopHandleConnectRequest(uint8_t* buffer, uint16_t length,
     // outside the device's line is therefore made anew, and so is the .1 to .10
     // pool that firmware up to 1.4.29 made on the device's own line. A pool written
     // through device management that happens to be exactly .1 to .10 is renewed
-    // as well.
+    // as well. The line is read from the first entry that is not empty (0.0.0), so
+    // a written pool with a gap at the start is kept; one without any entry is made
+    // anew.
     const uint16_t ownAddress = _deviceObject.individualAddress();
-    if(addresses != nullptr && (addresses[0] != (ownAddress >> 8) ||
+    uint16_t firstEntry = 0;
+    for(int a = 0; addresses != nullptr && a < KNX_TUNNELING && firstEntry == 0; a++)
+        popWord(firstEntry, addresses + a*2);
+    if(addresses != nullptr && (firstEntry == 0 || (firstEntry >> 8) != (ownAddress >> 8) ||
                                 IpParameterObject::isLegacyTunnelAddresses(ownAddress, addresses)))
     {
 #ifdef KNX_LOG_TUNNELING
@@ -765,6 +778,9 @@ void IpDataLinkLayer::loopHandleConnectRequest(uint8_t* buffer, uint16_t length,
     int firstFreeTunnel = -1;
     int firstResAndFreeTunnel = -1;
     int firstResAndOccTunnel = -1;
+    const bool forTunnel = connRequest.cri().type() == TUNNEL_CONNECTION;
+    bool reservedAssign = false;    // tunIdx is a reserved slot: it keeps its own address
+    bool noUniqueAddress = false;   // a slot was free, but no address for it
     bool tunnelResActive[KNX_TUNNELING];
     uint8_t tunnelResOptions[KNX_TUNNELING];
     for(int i = 0; i < KNX_TUNNELING; i++)
@@ -823,6 +839,7 @@ void IpDataLinkLayer::loopHandleConnectRequest(uint8_t* buffer, uint16_t length,
         if(firstResAndFreeTunnel >= 0)
         {
             tunIdx = firstResAndFreeTunnel;
+            reservedAssign = true;
         }
         else if(firstResAndOccTunnel >= 0)
         {
@@ -832,17 +849,28 @@ void IpDataLinkLayer::loopHandleConnectRequest(uint8_t* buffer, uint16_t length,
             }
             else if(tunnelResOptions[firstResAndOccTunnel] == 2)  // close current tunnel connection on this tunnel and assign to this request
             {
-                KnxIpDisconnectRequest discReq;
-                discReq.channelId(tunnels[firstResAndOccTunnel].ChannelId);
-                discReq.hpaiCtrl().length(LEN_IPHPAI);
-                discReq.hpaiCtrl().code(IPV4_UDP);
-                discReq.hpaiCtrl().ipAddress(tunnels[firstResAndOccTunnel].IpAddress);
-                discReq.hpaiCtrl().ipPortNumber(tunnels[firstResAndOccTunnel].PortCtrl);
-                _platform.sendBytesUniCast(tunnels[firstResAndOccTunnel].IpAddress, tunnels[firstResAndOccTunnel].PortCtrl, discReq.data(), discReq.totalLength());
-                tunnels[firstResAndOccTunnel].Reset();
+                // Only for an address that can be handed out at all; otherwise the
+                // open tunnel would be closed for a request that is then refused.
+                uint16_t resPa = 0;
+                popWord(resPa, addresses + (firstResAndOccTunnel*2));
+                if(!IpParameterObject::isUsableTunnelAddress(ownAddress, resPa))
+                {
+                    noUniqueAddress = true; // decline, the open tunnel stays
+                }
+                else
+                {
+                    KnxIpDisconnectRequest discReq;
+                    discReq.channelId(tunnels[firstResAndOccTunnel].ChannelId);
+                    discReq.hpaiCtrl().length(LEN_IPHPAI);
+                    discReq.hpaiCtrl().code(IPV4_UDP);
+                    discReq.hpaiCtrl().ipAddress(tunnels[firstResAndOccTunnel].IpAddress);
+                    discReq.hpaiCtrl().ipPortNumber(tunnels[firstResAndOccTunnel].PortCtrl);
+                    _platform.sendBytesUniCast(tunnels[firstResAndOccTunnel].IpAddress, tunnels[firstResAndOccTunnel].PortCtrl, discReq.data(), discReq.totalLength());
+                    tunnels[firstResAndOccTunnel].Reset();
 
-
-                tunIdx = firstResAndOccTunnel;
+                    tunIdx = firstResAndOccTunnel;
+                    reservedAssign = true;
+                }
             }
             else if(tunnelResOptions[firstResAndOccTunnel] == 3)  // use the first unreserved tunnel (if one)
             {
@@ -872,20 +900,46 @@ void IpDataLinkLayer::loopHandleConnectRequest(uint8_t* buffer, uint16_t length,
     {
         tun = &tunnels[tunIdx];
 
+        // A tunnel address is never x.y.0 or the device's own address, and never
+        // one an open tunnel already has, whatever a written pool holds (08_TSSH
+        // 5.3.1, 5.3.2). A device management connection gets none: its connect
+        // response carries no address and its L_Data is dropped
+        // (loopHandleDeviceConfigurationRequest, loopHandleTunnelingRequest), so it
+        // neither uses up a pool address nor is refused for lack of one, and ETS
+        // can reach the device to correct a pool as long as a slot is free.
         uint16_t tunPa = 0;
-        popWord(tunPa, addresses + (tunIdx*2));
-
-        //check if this PA is in use (should not happen, only when there is one pa wrongly assigned to more then one tunnel)
-        for(int x = 0; x < KNX_TUNNELING; x++)
-            if(tunnels[x].IndividualAddress == tunPa)
+        if(forTunnel && reservedAssign)
+        {
+            // a reserved tunnel keeps the address of its slot
+            popWord(tunPa, addresses + (tunIdx*2));
+            if(!IpParameterObject::isUsableTunnelAddress(ownAddress, tunPa) || tunnelAddressInUse(tunPa))
+                tunPa = 0;
+        }
+        else if(forTunnel)
+        {
+            // any other tunnel takes the first free address of the pool, wherever it
+            // stands, and leaves the reserved slots' addresses alone (upstream
+            // OpenKNX/knx ce26d6e)
+            for(int a = 0; a < KNX_TUNNELING && tunPa == 0; a++)
             {
-#ifdef KNX_LOG_TUNNELING
-    	        println("cannot use tunnel because PA is already in use");
-#endif
-                tunIdx = 0xFF;
-                tun = nullptr;
-                break;
+                if(resTunActive && (tunCtrlBytes[a] & 0x80))
+                    continue;
+                uint16_t cand = 0;
+                popWord(cand, addresses + a*2);
+                if(IpParameterObject::isUsableTunnelAddress(ownAddress, cand) && !tunnelAddressInUse(cand))
+                    tunPa = cand;
             }
+        }
+
+        if(forTunnel && tunPa == 0)     // 0 is x.y.0, so never a usable address
+        {
+#ifdef KNX_LOG_TUNNELING
+    	    println("no tunnel address left that is not x.y.0, the device's own or in use");
+#endif
+            tunIdx = 0xFF;
+            tun = nullptr;
+            noUniqueAddress = true;
+        }
         if(tun)
             tun->IndividualAddress = tunPa;
 
@@ -894,7 +948,7 @@ void IpDataLinkLayer::loopHandleConnectRequest(uint8_t* buffer, uint16_t length,
     if(tun == nullptr)
     {
         println("no free tunnel availible");
-        KnxIpConnectResponse connRes(0x00, E_NO_MORE_CONNECTIONS);
+        KnxIpConnectResponse connRes(0x00, noUniqueAddress ? E_NO_MORE_UNIQUE_CONNECTIONS : E_NO_MORE_CONNECTIONS);
         _platform.sendBytesUniCast(connRequest.hpaiCtrl().ipAddress(), connRequest.hpaiCtrl().ipPortNumber(), connRes.data(), connRes.totalLength());
         return;
     }
