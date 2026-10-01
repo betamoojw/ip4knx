@@ -6,7 +6,37 @@
 
 #include "knx/bits.h"
 #include "lwip/igmp.h"
+#include "lwip/pbuf.h"
+#include "lwip/udp.h"
+#include "esp_netif.h"
 #include "esp_netif_net_stack.h"
+
+// Received KNXnet/IP datagrams wait here until IpDataLinkLayer::loop() reads
+// them. A socket queues them in its lwIP receive mailbox instead, and that
+// holds six (CONFIG_LWIP_UDP_RECVMBOX_SIZE, fixed in the precompiled core):
+// ten disconnect requests sent back to back were all in before loop() ran
+// once, four were dropped, and their tunnels stayed open until the 120 s
+// heartbeat timeout. Each datagram is copied out here as lwIP delivers it, so
+// the pbuf — on WiFi a driver receive buffer — is released at once.
+#define UDP_RX_BUFFER_SIZE 4096
+// The largest datagram IpDataLinkLayer::loop() reads.
+#define UDP_RX_MAX_DATAGRAM 512
+
+struct UdpRxHeader
+{
+    uint32_t addr;   // sender, network byte order
+    uint16_t port;
+    uint16_t len;
+};
+
+struct UdpSend
+{
+    struct udp_pcb* pcb;
+    struct pbuf* p;
+    ip_addr_t dst;
+    uint16_t port;
+    err_t err;
+};
 
 // #ifndef KNX_SERIAL
 //     #define KNX_SERIAL Serial1
@@ -115,12 +145,119 @@ bool Esp32Platform::setupMultiCast(uint32_t addr, uint16_t port)
     print(mcastaddr.toString().c_str());
     print(":");
     println(port);
-    uint8_t result = _udp.beginMulticast(mcastaddr, port);
-    if (result == 0)
+
+    if (_udpRx == nullptr)
+        _udpRx = xRingbufferCreate(UDP_RX_BUFFER_SIZE, RINGBUF_TYPE_NOSPLIT);
+    if (_udpRx == nullptr)
+    {
+        println("KNX multicast: no memory for the receive buffer");
+        return false;
+    }
+
+    closeMultiCast();   // same port: an endpoint still open would refuse the bind
+    ip4_addr_set_u32(&_udpGroup, htonl(addr));
+    esp_err_t result = esp_netif_tcpip_exec(udpOpen, this);
+    if (result != ESP_OK)
         println("KNX multicast join failed");
 
-    return result != 0;
-    // KNX_DEBUG_SERIAL.printf("result %d\n", result);
+    return result == ESP_OK;
+}
+
+// udpOpen(), udpClose() and udpSendInCore() go through esp_netif_tcpip_exec(),
+// which with core locking runs them in the calling task while it holds the
+// lwIP core lock. lwIP calls udpReceive() in the tcpip thread with that lock
+// held. Keep all four short: while they run, lwIP processes nothing else.
+
+esp_err_t Esp32Platform::udpOpen(void* ctx)
+{
+    Esp32Platform* self = (Esp32Platform*)ctx;
+    struct udp_pcb* pcb = udp_new_ip_type(IPADDR_TYPE_V4);
+    if (pcb == nullptr)
+        return ESP_ERR_NO_MEM;
+
+    ip_set_option(pcb, SOF_REUSEADDR);
+    if (udp_bind(pcb, IP4_ADDR_ANY, self->_multicastPort) != ERR_OK)
+    {
+        udp_remove(pcb);
+        return ESP_FAIL;
+    }
+    // Any interface, as before: the socket's IP_ADD_MEMBERSHIP with
+    // imr_interface = INADDR_ANY came down to this same call.
+    if (igmp_joingroup(IP4_ADDR_ANY4, &self->_udpGroup) != ERR_OK)
+    {
+        // A join can fail part way through the interfaces; undo the rest.
+        igmp_leavegroup(IP4_ADDR_ANY4, &self->_udpGroup);
+        udp_remove(pcb);
+        return ESP_FAIL;
+    }
+    udp_recv(pcb, udpReceive, self);
+    self->_udpPcb = pcb;
+    return ESP_OK;
+}
+
+esp_err_t Esp32Platform::udpClose(void* ctx)
+{
+    Esp32Platform* self = (Esp32Platform*)ctx;
+    if (self->_udpPcb == nullptr)
+        return ESP_OK;
+
+    igmp_leavegroup(IP4_ADDR_ANY4, &self->_udpGroup);
+    udp_remove(self->_udpPcb);
+    self->_udpPcb = nullptr;
+    return ESP_OK;
+}
+
+void Esp32Platform::udpReceive(void* arg, struct udp_pcb* pcb, struct pbuf* p, const ip_addr_t* addr, uint16_t port)
+{
+    (void)pcb;
+    Esp32Platform* self = (Esp32Platform*)arg;
+    // An empty datagram has nothing to read; the socket returned nothing for
+    // those either, so it is neither queued nor counted.
+    if (p->tot_len > 0)
+    {
+        void* item = nullptr;
+        if (p->tot_len <= UDP_RX_MAX_DATAGRAM &&
+            xRingbufferSendAcquire(self->_udpRx, &item, sizeof(UdpRxHeader) + p->tot_len, 0) == pdTRUE)
+        {
+            UdpRxHeader* hdr = (UdpRxHeader*)item;
+            hdr->addr = ip4_addr_get_u32(ip_2_ip4(addr));
+            hdr->port = port;
+            hdr->len = p->tot_len;
+            pbuf_copy_partial(p, (uint8_t*)item + sizeof(UdpRxHeader), p->tot_len, 0);
+            xRingbufferSendComplete(self->_udpRx, item);
+        }
+        else
+            self->_udpRxDropped = self->_udpRxDropped + 1;   // reported from readBytesMultiCast(), not from here
+    }
+    pbuf_free(p);
+}
+
+static esp_err_t udpSendInCore(void* ctx)
+{
+    UdpSend* s = (UdpSend*)ctx;
+    s->err = udp_sendto(s->pcb, s->p, &s->dst, s->port);
+    return ESP_OK;
+}
+
+bool Esp32Platform::udpSend(const IPAddress& ip, uint16_t port, const uint8_t* buffer, uint16_t len)
+{
+    if (_udpPcb == nullptr)
+        return false;
+
+    struct pbuf* p = pbuf_alloc(PBUF_TRANSPORT, len, PBUF_RAM);
+    if (p == nullptr)
+        return false;
+    memcpy(p->payload, buffer, len);
+
+    UdpSend s = {};
+    s.pcb = _udpPcb;
+    s.p = p;
+    IP_ADDR4(&s.dst, ip[0], ip[1], ip[2], ip[3]);
+    s.port = port;
+    s.err = ERR_OK;
+    esp_netif_tcpip_exec(udpSendInCore, &s);
+    pbuf_free(p);
+    return s.err == ERR_OK;
 }
 
 // Re-send the IGMP membership reports for this interface. Deliberately not a
@@ -157,40 +294,66 @@ void Esp32Platform::refreshMultiCast()
 
 void Esp32Platform::closeMultiCast()
 {
-    _udp.stop();
+    esp_netif_tcpip_exec(udpClose, this);
+
+    // A closed socket discarded what it had queued; so does this endpoint.
+    if (_udpRx != nullptr)
+    {
+        size_t size = 0;
+        void* item;
+        while ((item = xRingbufferReceive(_udpRx, &size, 0)) != nullptr)
+            vRingbufferReturnItem(_udpRx, item);
+    }
 }
 
 bool Esp32Platform::sendBytesMultiCast(uint8_t * buffer, uint16_t len)
 {
     //printHex("<- ",buffer, len);
-    _udp.beginPacket(_multicastIP, _multicastPort);
-    _udp.write(buffer, len);
-    _udp.endPacket();
+    udpSend(_multicastIP, _multicastPort, buffer, len);
     return true;
 }
 
 int Esp32Platform::readBytesMultiCast(uint8_t * buffer, uint16_t maxLen, uint32_t& src_addr, uint16_t& src_port)
 {
-    int len = _udp.parsePacket();
-    if (len == 0)
-        return 0;
-
-    if (len > maxLen)
+    // Reported here and at most once a second: udpReceive() runs in the tcpip
+    // thread with the core lock held, and printing there under a flood would
+    // hold up all networking.
+    const uint32_t dropped = _udpRxDropped;
+    if (dropped != _udpRxDroppedReported && millis() - _udpRxReportedAt >= 1000)
     {
-        println("Unexpected UDP data packet length - drop packet");
-        for (size_t i = 0; i < len; i++)
-            _udp.read();
-        return 0;
+        print("KNX/IP receive: ");
+        print(dropped - _udpRxDroppedReported);
+        println(" datagram(s) dropped (buffer full or too long)");
+        _udpRxDroppedReported = dropped;
+        _udpRxReportedAt = millis();
     }
 
-    _udp.read(buffer, len);
-    _remoteIP = _udp.remoteIP();
-    _remotePort = _udp.remotePort();
-    src_addr = htonl(_remoteIP);
-    src_port = _remotePort;
+    if (_udpRx == nullptr)
+        return 0;
+
+    size_t size = 0;
+    uint8_t* item = (uint8_t*)xRingbufferReceive(_udpRx, &size, 0);
+    if (item == nullptr)
+        return 0;
+
+    UdpRxHeader hdr;
+    memcpy(&hdr, item, sizeof(hdr));
+    int len = 0;
+    if (hdr.len > maxLen)
+        println("Unexpected UDP data packet length - drop packet");
+    else
+    {
+        memcpy(buffer, item + sizeof(hdr), hdr.len);
+        len = hdr.len;
+        _remoteIP = IPAddress(hdr.addr);
+        _remotePort = hdr.port;
+        src_addr = ntohl(hdr.addr);
+        src_port = hdr.port;
+    }
+    vRingbufferReturnItem(_udpRx, item);
 
     // print("Remote IP: ");
-    // print(_udp.remoteIP().toString().c_str());
+    // print(_remoteIP.toString().c_str());
     // printHex("-> ", buffer, len);
 
     return len;
@@ -206,13 +369,8 @@ bool Esp32Platform::sendBytesUniCast(uint32_t addr, uint16_t port, uint8_t* buff
     if(!port)
         port = _remotePort;
 
-    if(_udp.beginPacket(ucastaddr, port) == 1)
-    {
-        _udp.write(buffer, len);
-        if(_udp.endPacket() == 0) println("sendBytesUniCast endPacket fail");
-    }
-    else
-        println("sendBytesUniCast beginPacket fail");
+    if (!udpSend(ucastaddr, port, buffer, len))
+        println("sendBytesUniCast fail");
     return true;
 }
 

@@ -64,8 +64,8 @@ static const char* deviceHostname() {
 //
 // Netif priority matters here. ESP_NETIF_INHERENT_DEFAULT_WIFI_STA has
 // route_prio 100 and ..._ETH only 50, so with both interfaces up the default
-// netif — and with it the IGMP join behind NetworkUDP::beginMulticast(), which
-// passes imr_interface = INADDR_ANY — would stay on WiFi even with the cable
+// netif — and with it the IGMP join behind Esp32Platform::setupMultiCast(),
+// which joins on IP4_ADDR_ANY — would stay on WiFi even with the cable
 // plugged in. Raising ETH above the STA makes the wire win whenever it has a
 // link, and esp_netif falls back to WiFi by itself when it does not.
 #define ETH_ROUTE_PRIO 120
@@ -1668,6 +1668,8 @@ void setup() {
         auto dl = ((Bau091A&)knx.bau()).getPrimaryDataLinkLayer();
         if(dl) activeClients = dl->getActiveTunnelCount();
         json += "\"active_clients\":" + String(activeClients) + ",";
+        // KNXnet/IP datagrams the gateway had to drop on receive since boot.
+        json += "\"knxip_rx_dropped\":" + String(knx.platform().udpRxDropped()) + ",";
         // KNXnet/IP routing runs only once an individual address other than 15.15.0 is set.
         json += "\"knx_routing\":" + String(dl && dl->routingActive() ? "true" : "false") + ",";
         
@@ -2011,6 +2013,17 @@ void loop() {
             // interfaces share the subnet again for the rest of the uptime.
             wifiRadioPark("web UI finished with the radio");
         }
+    }
+#endif
+
+#ifdef KNX_REJOIN_TEST_MS
+    // Bench harness only, never defined in a release build: closes and reopens
+    // the KNXnet/IP endpoint every N ms, as an interface change does, so that
+    // path can be exercised without pulling a cable or dropping the WiFi.
+    static unsigned long lastRejoinTest = 0;
+    if (millis() - lastRejoinTest > KNX_REJOIN_TEST_MS) {
+        lastRejoinTest = millis();
+        knxRejoinRouting("bench");
     }
 #endif
 
