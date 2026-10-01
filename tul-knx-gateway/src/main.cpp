@@ -1701,6 +1701,37 @@ void setup() {
             json += "\"uart_frame_err\":" + String(tp.uartFrameErrors()) + ",";
             json += "\"uart_line_err_unexpected\":" + String(tp.uartUnexpectedLineErrors()) + ",";
             json += "\"acr0_dropped\":" + String(tp.internalRegisterDropped()) + ",";
+#ifdef TPUART_CON_DIAG
+            {
+                using R = TPUart::Receiver;
+                const R& r = tp.conDiag();
+                json += "\"con_diag\":{\"data_cons\":" + String(r._diagDataCons) +
+                        ",\"orphan_cons\":" + String(r._diagOrphanCons) +
+                        ",\"ackn_other\":" + String(r._diagAcknOther) +
+                        ",\"ackn_timeout\":" + String(r._diagAcknTimeout) +
+                        ",\"state_taken\":" + String(r._diagStateTaken) + ",\"other_vals\":\"";
+                for (uint8_t i = 0; i < R::DIAG_SNAPS; i++) {
+                    char b[4];
+                    snprintf(b, sizeof b, "%02X ", r._diagOtherVal[i]);
+                    json += b;
+                }
+                json += "\",\"snaps\":[";
+                const uint32_t n = r._diagSnapCount;
+                const uint8_t k = n < R::DIAG_SNAPS ? n : R::DIAG_SNAPS;
+                for (uint8_t s = 0; s < k; s++) {
+                    const uint8_t slot = (n - 1 - s) % R::DIAG_SNAPS; // newest first
+                    json += s ? ",\"" : "\"";
+                    json += r._diagSnapTx[slot] ? "tx " : "-- ";
+                    for (uint8_t i = 0; i < R::DIAG_HIST; i++) {
+                        char b[10];
+                        snprintf(b, sizeof b, "%02X+%u ", r._diagSnap[slot][2 * i], r._diagSnap[slot][2 * i + 1]);
+                        json += b;
+                    }
+                    json += "\"";
+                }
+                json += "]},";
+            }
+#endif
             json += "\"acr0\":" + acr0StatusJson(tp.internalRegisterTimeouts());
             json += "}";
         } else {

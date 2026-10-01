@@ -53,6 +53,9 @@ namespace TPUart
                         (_searchBuffer.frame().isTransmitted() && isStateAnswer(value)))
                         return;
                 }
+#ifdef TPUART_CON_DIAG
+                _diagAcknTimeout++;
+#endif
                 _state = RX_FRAME_COMPLETE;
                 processCompleteFrame();
                 return;
@@ -103,6 +106,16 @@ namespace TPUart
         if (value != -1)
         {
             _lastReceivedTime = millis();
+#ifdef TPUART_CON_DIAG
+            {
+                const unsigned long now = millis();
+                const unsigned long gap = now - _diagLastAt;
+                _diagLastAt = now;
+                _diagHist[_diagHead] = (uint8_t)value;
+                _diagGap[_diagHead] = gap > 255 ? 255 : (uint8_t)gap;
+                _diagHead = (_diagHead + 1) % DIAG_HIST;
+            }
+#endif
 
             const uint start = micros();
             _dll._statistics.incrementRxReceivedBytes();
@@ -139,6 +152,9 @@ namespace TPUart
         {
             _dll.receivedState(value);
             _searchBuffer.dropLast();
+#ifdef TPUART_CON_DIAG
+            _diagStateTaken++;
+#endif
             return;
         }
 
@@ -152,6 +168,9 @@ namespace TPUart
             _searchBuffer.frame().setDataCon();
             acknowledge = true;
             _dll.getTransmitter().finalize();
+#ifdef TPUART_CON_DIAG
+            _diagDataCons++;
+#endif
         }
         else if ((value & L_ACKN_MASK) == L_ACKN_IND)
         {
@@ -160,6 +179,14 @@ namespace TPUart
             _searchBuffer.frame().setAcknowledge(isBusy, isNack);
             acknowledge = true;
         }
+#ifdef TPUART_CON_DIAG
+        // Neither confirmation nor the start of the next repetition's echo.
+        else if ((value & L_DATA_MASK) != L_DATA_STANDARD_IND && (value & L_DATA_MASK) != L_DATA_EXTENDED_IND)
+        {
+            _diagOtherVal[_diagAcknOther % DIAG_SNAPS] = (uint8_t)value;
+            _diagAcknOther++;
+        }
+#endif
 
         processCompleteFrame(acknowledge);
     }
@@ -424,6 +451,20 @@ namespace TPUart
         }
         else if ((value & L_DATA_CON_MASK) == L_DATA_CON)
         {
+#ifdef TPUART_CON_DIAG
+            {
+                const uint8_t slot = _diagSnapCount % DIAG_SNAPS;
+                for (uint8_t i = 0; i < DIAG_HIST; i++)
+                {
+                    const uint8_t idx = (_diagHead + i) % DIAG_HIST; // oldest first
+                    _diagSnap[slot][2 * i] = _diagHist[idx];
+                    _diagSnap[slot][2 * i + 1] = _diagGap[idx];
+                }
+                _diagSnapTx[slot] = _dll.getTransmitter().awaitResponse();
+                _diagOrphanCons++;
+                _diagSnapCount++;
+            }
+#endif
             _dll.getTransmitter().finalize();
         }
 

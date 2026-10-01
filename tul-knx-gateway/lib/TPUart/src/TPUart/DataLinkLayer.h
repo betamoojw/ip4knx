@@ -229,6 +229,9 @@ namespace TPUart
         // Readings discarded because the line reported an error while they were
         // in flight. Stays at zero on a healthy link.
         unsigned int internalRegisterDropped() const { return _regReadDropped; }
+#ifdef TPUART_CON_DIAG
+        const Receiver &conDiag() const { return _receiver; }
+#endif
 
         bool internalRegisterPending() const { return _regReadPending; }
         bool internalRegisterValid() const { return _regReadValid; }

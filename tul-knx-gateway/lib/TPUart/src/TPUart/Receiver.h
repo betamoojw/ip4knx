@@ -52,5 +52,26 @@ namespace TPUart
 
         unsigned short getAwaitBytes();
         unsigned short getSearchBufferPosition();
+
+#ifdef TPUART_CON_DIAG
+        // Bench only: the raw bytes ahead of every L_DATA_CON that the control-byte
+        // decoder took because no transmitted frame was waiting for it -- each one
+        // is a confirmation the stack above never saw.
+        static constexpr uint8_t DIAG_HIST = 16;
+        static constexpr uint8_t DIAG_SNAPS = 4;
+        uint8_t _diagHist[DIAG_HIST] = {};
+        uint8_t _diagGap[DIAG_HIST] = {};
+        uint8_t _diagHead = 0;
+        unsigned long _diagLastAt = 0;
+        volatile uint32_t _diagDataCons = 0;
+        volatile uint32_t _diagOrphanCons = 0;
+        volatile uint32_t _diagAcknOther = 0;
+        volatile uint32_t _diagAcknTimeout = 0;
+        volatile uint32_t _diagStateTaken = 0;
+        uint8_t _diagOtherVal[DIAG_SNAPS] = {};
+        uint8_t _diagSnap[DIAG_SNAPS][DIAG_HIST * 2] = {};
+        uint8_t _diagSnapTx[DIAG_SNAPS] = {};
+        volatile uint32_t _diagSnapCount = 0;
+#endif
     };
 } // namespace TPUart
