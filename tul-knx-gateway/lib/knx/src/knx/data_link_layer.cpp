@@ -68,8 +68,12 @@ bool DataLinkLayer::isTunnelAddress(uint16_t addr)
 
 void DataLinkLayer::dataRequestFromTunnel(CemiFrame& frame)
 {
-    _cemiServer->dataConfirmationToTunnel(frame);
-
+    // No L_Data.con here: dataConReceived() returns it once the line has answered,
+    // with its result. Confirmed up front, a frame was reported delivered before it
+    // was on the line and whether or not anybody acknowledged it; an address check
+    // through the tunnel found every address occupied. A frame that is handled
+    // locally below never reaches the line and is confirmed where it returns.
+    // (upstream OpenKNX/knx 74097b8)
     frame.messageCode(L_data_ind);
 
     // 03_06_03 4.1.5.3.3: the system-broadcast flag applies to open media only, and a
@@ -107,21 +111,24 @@ void DataLinkLayer::dataRequestFromTunnel(CemiFrame& frame)
 
     if(frame.addressType() == AddressType::IndividualAddress)
     {
-        if(frame.destinationAddress() == _deviceObject.individualAddress())
-            return;
+        bool local = frame.destinationAddress() == _deviceObject.individualAddress();
 #ifdef KNX_TUNNELING_STRICT_TOPOLOGY
-        if(isRoutedPA(frame.destinationAddress()))
-            return;
+        local = local || isRoutedPA(frame.destinationAddress());
 #endif
 #ifdef KNX_TUNNELING_NO_TUNNEL_PA_ON_TP
-        if(isTunnelingPA(frame.destinationAddress()))
-            return;
+        local = local || isTunnelingPA(frame.destinationAddress());
 #endif
+        if(local)
+        {
+            frame.confirm(ConfirmNoError);
+            _cemiServer->dataConfirmationToTunnel(frame);
+            return;
+        }
     }
 
 #endif
-    
-    // Send to KNX medium
+
+    // Send to KNX medium; the L_Data.con follows from dataConReceived()
     sendFrame(frame);
 }
 #endif
@@ -156,14 +163,26 @@ void DataLinkLayer::dataConReceived(CemiFrame& frame, bool success)
     SystemBroadcast systemBroadcast = frame.systemBroadcast();
 
 #ifdef USE_CEMI_SERVER
-    // if the confirmation was caused by a tunnel request then
-    // do not send it to the local stack
-    if (frame.sourceAddress() == _cemiServer->clientAddress())
+    // A frame an open tunnel sent (the cEMI client, without tunnelling): its
+    // L_Data.con, carrying the result set above, goes back to it and not to the
+    // local stack. Only the data link layer the cEMI server sends tunnel requests on
+    // answers: the 091A runs this on both of its layers for a frame it also routes,
+    // and would otherwise confirm twice. (upstream OpenKNX/knx 74097b8)
+    // With tunnels, a frame from the cEMI client address (the device's own + 1 from
+    // the start) is confirmed to nobody, as before: no tunnel holds that address, and
+    // dataConfirmationToTunnel() would hand the con to a device management connection.
+#ifdef KNX_TUNNELING
+    const bool toClient = _cemiServer->isTunnelAddress(frame.sourceAddress());
+#else
+    const bool toClient = frame.sourceAddress() == _cemiServer->clientAddress();
+#endif
+    if (toClient || frame.sourceAddress() == _cemiServer->clientAddress())
     {
-        // Stop processing here and do NOT send it the local network layer
+        if (toClient && _cemiServer->dataLinkLayer() == this)
+            _cemiServer->dataConfirmationToTunnel(frame);
         return;
     }
-#endif    
+#endif
 
     if (addrType == GroupAddress && destination == 0)
             if (systemBroadcast == SysBroadcast)

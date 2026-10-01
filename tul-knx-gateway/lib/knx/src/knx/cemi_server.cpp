@@ -35,6 +35,11 @@ void CemiServer::dataLinkLayerPrimary(DataLinkLayer& layer)
     _dataLinkLayerPrimary = &layer;
 }
 
+bool CemiServer::isTunnelAddress(uint16_t address) const
+{
+    return _dataLinkLayerPrimary != nullptr && _dataLinkLayerPrimary->isTunnelAddress(address);
+}
+
 #endif
 uint16_t CemiServer::clientAddress() const
 {

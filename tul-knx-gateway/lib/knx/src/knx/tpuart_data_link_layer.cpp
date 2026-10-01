@@ -232,7 +232,28 @@ void TpUartDataLinkLayer::processRxFrame(TPUart::Frame &tpFrame)
     CemiFrame cemiFrame(cemiData, tpFrame.cemiSize());
 
     if (tpFrame.isTransmitted()) {
-        dataConReceived(cemiFrame, tpFrame.isAck());
+        // One L_Data.con per frame: the transceiver repeats an unacknowledged frame
+        // up to three times and answers only the last attempt with its L_DATA_CON
+        // (NCN5130 DS p.36). The echoes of the earlier attempts carry no result;
+        // confirming each one told a tunnel client "failed" four times for one
+        // request.
+        if (tpFrame.isDataCon())
+        {
+            // The device does not acknowledge what it sends itself. An individual
+            // address it acknowledges for every other sender on the line -- one it
+            // routes, a tunnel's, a defended tunnel address -- has reached it, so it
+            // counts as delivered: otherwise a tunnel client is told "failed" for a
+            // frame the device took, and an address check through the tunnel reads
+            // the device's own tunnel addresses as free. Groups keep the line's answer.
+            bool success = tpFrame.isAck();
+            if (!success && !tpFrame.isGroupAddress())
+                success = _cb.isAckRequired(tpFrame.destination(), false) == TPAckType::AckReqAck;
+            // The con mirrors the request (03_06_03 4.1.5.3.4). The echo of a repeated
+            // attempt has the repeat flag cleared, and clients such as FHEM's KNXIO
+            // drop a confirmation that does not read as the frame they sent.
+            cemiFrame.repetition(WasNotRepeated);
+            dataConReceived(cemiFrame, success);
+        }
         free(cemiData); // Frame::cemiData() returns a malloc()'d buffer -> must be free()'d, not delete'd
         return;
     }

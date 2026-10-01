@@ -29,8 +29,13 @@ class CemiServer
     CemiServer(BauSystemB& bau);
 
     void dataLinkLayer(DataLinkLayer& layer);
+    // The data link layer tunnel requests are sent on; its dataConReceived()
+    // answers them with the L_Data.con.
+    DataLinkLayer* dataLinkLayer() const { return _dataLinkLayer; }
 #ifdef KNX_TUNNELING
     void dataLinkLayerPrimary(DataLinkLayer& layer);
+    // True for the individual address of an open tunnel.
+    bool isTunnelAddress(uint16_t address) const;
 #endif
 
     // from data link layer

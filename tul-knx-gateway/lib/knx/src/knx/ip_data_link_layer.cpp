@@ -181,12 +181,15 @@ void IpDataLinkLayer::dataConfirmationToTunnel(CemiFrame& frame)
         return;
     }
 
+    // To the open tunnel that sent the frame. Skipping the tunnel whose address is
+    // the destination dropped the con of a client probing its own tunnel address
+    // (source == destination). (upstream OpenKNX/knx 8010a05)
     KnxIpTunnelConnection *tun = nullptr;
     for(int i = 0; i < KNX_TUNNELING; i++)
     {
-        if(tunnels[i].IndividualAddress == frame.destinationAddress())
+        if(tunnels[i].ChannelId == 0)
             continue;
-            
+
         if(tunnels[i].IndividualAddress == frame.sourceAddress())
         {
             tun = &tunnels[i];
@@ -345,12 +348,12 @@ uint8_t IpDataLinkLayer::getActiveTunnelCount() const
 // device (15.15.0) defends none: it has no place in the topology yet, so it
 // claims no addresses in it.
 // Only the acknowledge is given, nothing is transmitted (upstream OpenKNX/knx
-// f745efe). That answers the check by acknowledge (2.22.3) from a management
-// client on another interface of the line; the check over a transport connection
-// (03_05_02 2.19) would also need the T_Disconnect that 03_08_04 2.2.2 asks for,
-// which is not sent. Through this device's own tunnels the defence is not seen at
-// all: the device does not acknowledge its own frames, and a tunnel gets its
-// L_Data.con before the frame is on the line (dataRequestFromTunnel).
+// f745efe). That answers the check by acknowledge (2.22.3), from another interface
+// of the line and through this device's own tunnels alike: the device does not
+// acknowledge what it sends itself, so the tunnel's L_Data.con counts an address
+// defended here as delivered (TpUartDataLinkLayer::processRxFrame). The check over
+// a transport connection (03_05_02 2.19) would also need the T_Disconnect that
+// 03_08_04 2.2.2 asks for, which is not sent.
 void IpDataLinkLayer::refreshDefendedTunnelAddresses()
 {
     uint16_t next[KNX_TUNNELING];
