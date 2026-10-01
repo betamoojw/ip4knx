@@ -4,20 +4,22 @@ ip4knx pre-release test suite — exercises the firmware end-to-end across
 two devices and prints a pass/fail report. Designed to run before tagging
 a release: if any check FAILs, do not tag.
 
-Coverage (per device, 11 checks):
+Coverage (per device, 13 checks):
   1.  pre_flight              /api/status reachable, JSON schema complete
   2.  ncn_self_test           power rails / baud / mode (bus-connected only)
   3.  web_api_surface         /api/* endpoints respond with expected shape
   4.  progmode_toggle         /api/progmode flips, reflected in /api/status
   5.  ota_query               /api/update/{check,status} JSON shape
   6.  tunnel_pool_full        open KNX_TUNNELING tunnels, 11th must reject
-  7.  source_validation       KNXnet/IP §4.4 source rewrite (v1.4.0)
-  8.  cemi_response_routing   M_PropRead via tunnel A — B must NOT see it
+  7.  tunnel_pool_written     pool written through device management
+  8.  disconnect_burst        all tunnels closed back to back, none left open
+  9.  source_validation       KNXnet/IP §4.4 source rewrite (v1.4.0)
+  10. cemi_response_routing   M_PropRead via tunnel A — B must NOT see it
                               (cherry-pick 1bd8201)
-  9.  apdu_length_router      PID_MAX_APDU_LENGTH_ROUTER == 254
+  11. apdu_length_router      PID_MAX_APDU_LENGTH_ROUTER == 254
                               (cherry-pick b50301e)
-  10. routing_indication      IP->TP routing gate (knx_routing: routed / ignored)
-  11. heap_stability          heap delta after full sweep ≤ 20 KB drop
+  12. routing_indication      IP->TP routing gate (knx_routing: routed / ignored)
+  13. heap_stability          heap delta after full sweep ≤ 20 KB drop
 
 Plus a cross-device consistency check (firmware version match).
 
@@ -52,7 +54,7 @@ from test_tunnel_source import (  # noqa: E402
     group_to_int, int_to_group, int_to_ia, ia_to_int,
     CONNECT_REQUEST, CONNECT_RESPONSE, TUNNELING_REQUEST, TUNNELING_ACK,
     DEVCFG_REQUEST, DEVCFG_ACK,
-    DISCONNECT_REQUEST, CEMI_LDATA_IND, CEMI_LDATA_REQ,
+    DISCONNECT_REQUEST, DISCONNECT_RESPONSE, CEMI_LDATA_IND, CEMI_LDATA_REQ,
     HPAI_PROTO_UDP, CRI_TUNNEL_LINKLAYER, CRI_DEVMGMT,
 )
 
@@ -68,6 +70,7 @@ PID_SERIAL_NUMBER = 11
 PID_MAX_APDU_LENGTH_ROUTER = 58
 
 EXPECTED_MAX_TUNNELS = 10
+DISCONNECT_BURST_ROUNDS = 3
 HEAP_DROP_THRESHOLD_BYTES = 20 * 1024
 
 
@@ -313,6 +316,56 @@ def t_tunnel_pool_written(dev: Device):
 
 
 @timed
+def t_disconnect_burst(dev: Device):
+    # Every tunnel closed at once, back to back, as a client shutting down does
+    # it: each DISCONNECT_REQUEST must be answered and no tunnel may stay open.
+    # Up to FW 1.4.170 the receive path held six datagrams; four of ten requests
+    # were dropped and their tunnels stayed until the 120 s heartbeat timeout.
+    # Several rounds, because over WiFi the requests sometimes arrive spread out
+    # enough to get through even then (one round in three on the bench).
+    # A burst this small must also not cost the receive buffer anything:
+    # knxip_rx_dropped (since 1.4.172) has to stay where it was.
+    code, body = http_get(dev.host, "/api/status")
+    dropped0 = body.get("knxip_rx_dropped") if code == 200 else None
+    for rnd in range(1, DISCONNECT_BURST_ROUNDS + 1):
+        clients: list[TunClient] = []
+        try:
+            for i in range(EXPECTED_MAX_TUNNELS):
+                c = TunClient(dev.host, f"D{i}", verbose=False)
+                c.connect()
+                clients.append(c)
+            time.sleep(0.3)
+            for c in clients:
+                c.send_disconnect()
+            statuses = [c.wait_disconnect(2.0) for c in clients]
+            time.sleep(0.3)
+            code, body = http_get(dev.host, "/api/status")
+            left = body.get("active_clients") if code == 200 else None
+            answered = sum(1 for s in statuses if s is not None)
+            ok = sum(1 for s in statuses if s == 0)
+            if ok != len(clients) or left != 0:
+                return "FAIL", (f"round {rnd}: {answered}/{len(clients)} disconnects answered "
+                                f"({ok} with E_NO_ERROR), {left} tunnel(s) left open")
+        finally:
+            for c in clients:
+                if c.disc_status is None:
+                    c.disconnect()      # unanswered: close it one at a time
+                else:
+                    c.close()
+            time.sleep(0.5)
+    if dropped0 is not None:
+        code, body = http_get(dev.host, "/api/status")
+        if code != 200:
+            return "FAIL", "status unreachable after the bursts"
+        dropped1 = body.get("knxip_rx_dropped")
+        if dropped1 != dropped0:
+            return "FAIL", f"receive buffer dropped datagrams during the bursts ({dropped0} -> {dropped1})"
+    note = ", receive buffer dropped nothing" if dropped0 is not None else ""
+    return "PASS", (f"{DISCONNECT_BURST_ROUNDS} x {EXPECTED_MAX_TUNNELS} disconnects back to back: "
+                    f"all answered, no tunnel left open{note}")
+
+
+@timed
 def t_source_validation(dev: Device):
     a = TunClient(dev.host, "A", verbose=False)
     b = TunClient(dev.host, "B", verbose=False)
@@ -388,6 +441,8 @@ class DevMgmtClient:
         self.cemi_raw: list[tuple[int, bytes, float]] = []
         self.recv_run = False
         self.recv_thread = None
+        self.disc_status = None
+        self.disc_evt = threading.Event()
 
     def log(self, msg):
         if self.verbose:
@@ -437,6 +492,10 @@ class DevMgmtClient:
                     msg = cemi[0]
                     self.cemi_raw.append((msg, bytes(cemi), time.time()))
                     self.log(f"<- DEVCFG seq={seq} msg=0x{msg:02x} len={len(cemi)}")
+            elif service == DISCONNECT_RESPONSE:
+                if len(data) >= 8:
+                    self.disc_status = data[7]
+                    self.disc_evt.set()
 
     def send_devcfg(self, cemi: bytes):
         conn = struct.pack(">BBBB", 4, self.channel, self.tx_seq, 0)
@@ -446,15 +505,21 @@ class DevMgmtClient:
         self.log(f"-> DEVCFG seq={self.tx_seq} cemi={cemi.hex()}")
         self.tx_seq = (self.tx_seq + 1) & 0xFF
 
-    def disconnect(self):
+    def disconnect(self, timeout=1.0, tries=2):
+        # Waits for the answer before closing, as TunClient.disconnect() does.
+        for _ in range(tries):
+            self.disc_evt.clear()
+            try:
+                req = build_disconnect_request(self.channel, self.local_ip, self.local_port)
+                self.sock.sendto(req, (self.host, 3671))
+            except Exception:
+                break
+            if self.disc_evt.wait(timeout):
+                break
         self.recv_run = False
-        try:
-            req = build_disconnect_request(self.channel, self.local_ip, self.local_port)
-            self.sock.sendto(req, (self.host, 3671))
-        except Exception:
-            pass
         try: self.sock.close()
         except Exception: pass
+        return self.disc_status
 
 
 # (legacy TunClientPlus kept inline for the tunnel-source test; cEMI capture
@@ -487,6 +552,8 @@ class TunClientPlus(TunClient):
                     parsed = parse_cemi_src_dst(cemi)
                     if parsed:
                         self.received.append((parsed[0], parsed[1], parsed[2], time.time()))
+            elif service == DISCONNECT_RESPONSE:
+                self.note_disconnect_response(data)
 
 
 @timed
@@ -615,6 +682,7 @@ ALL_TESTS = [
     ("ota_query",             t_ota_query),
     ("tunnel_pool_full",      t_tunnel_pool_full),
     ("tunnel_pool_written",   t_tunnel_pool_written),
+    ("disconnect_burst",      t_disconnect_burst),
     ("source_validation",     t_source_validation),
     ("cemi_devmgmt_roundtrip", t_cemi_devmgmt_roundtrip),
     ("apdu_length_router",    t_apdu_length_router),

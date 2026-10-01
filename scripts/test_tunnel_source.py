@@ -34,6 +34,7 @@ CONNECT_RESPONSE   = 0x0206
 CONNECTIONSTATE_REQ  = 0x0207
 CONNECTIONSTATE_RESP = 0x0208
 DISCONNECT_REQUEST = 0x0209
+DISCONNECT_RESPONSE = 0x020A
 DEVCFG_REQUEST     = 0x0310
 DEVCFG_ACK         = 0x0311
 TUNNELING_REQUEST  = 0x0420
@@ -160,6 +161,8 @@ class TunClient:
         self.received = []
         self.recv_thread = None
         self.recv_run = False
+        self.disc_status = None
+        self.disc_evt = threading.Event()
 
     def _discover_local_ip(self, peer):
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -225,6 +228,15 @@ class TunClient:
                     self.log(f"<- TUN.req seq={seq} msg=0x{msg:02x} src={int_to_ia(src)} dst={int_to_group(dst)}")
             elif service == TUNNELING_ACK:
                 pass
+            elif service == DISCONNECT_RESPONSE:
+                self.note_disconnect_response(data)
+
+    def note_disconnect_response(self, data):
+        # Called from the receiver thread; subclasses with their own receiver
+        # call it too.
+        if len(data) >= 8:
+            self.disc_status = data[7]
+            self.disc_evt.set()
 
     def send_tunneling(self, cemi):
         req = build_tunneling_request(self.channel, self.tx_seq, cemi)
@@ -232,17 +244,39 @@ class TunClient:
         self.log(f"-> TUN.req seq={self.tx_seq} cemi={cemi.hex()}")
         self.tx_seq = (self.tx_seq + 1) & 0xFF
 
-    def disconnect(self):
+    def send_disconnect(self):
+        """DISCONNECT_REQUEST only; wait_disconnect() collects the answer."""
+        self.disc_status = None
+        self.disc_evt.clear()
+        req = build_disconnect_request(self.channel, self.local_ip, self.local_port)
+        self.sock.sendto(req, (self.host, 3671))
+
+    def wait_disconnect(self, timeout):
+        """Status of the DISCONNECT_RESPONSE, or None if none came in time."""
+        return self.disc_status if self.disc_evt.wait(timeout) else None
+
+    def close(self):
         self.recv_run = False
-        try:
-            req = build_disconnect_request(self.channel, self.local_ip, self.local_port)
-            self.sock.sendto(req, (self.host, 3671))
-        except Exception:
-            pass
         try:
             self.sock.close()
         except Exception:
             pass
+
+    def disconnect(self, timeout=1.0, tries=2):
+        # Wait for the answer before closing: once the socket is gone, a request
+        # the device never saw cannot be told from an answered one, and the
+        # device keeps that tunnel until its 120 s heartbeat timeout.
+        status = None
+        for _ in range(tries):
+            try:
+                self.send_disconnect()
+            except Exception:
+                break
+            status = self.wait_disconnect(timeout)
+            if status is not None:
+                break
+        self.close()
+        return status
 
 
 def run(host, group_ga, verbose):

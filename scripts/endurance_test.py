@@ -51,7 +51,7 @@ from test_tunnel_source import (  # noqa: E402
     TunClient, build_cemi_group_write, build_tunneling_ack,
     build_connectionstate_req, parse_header,
     group_to_int, int_to_ia,
-    TUNNELING_REQUEST, TUNNELING_ACK, CONNECTIONSTATE_RESP,
+    TUNNELING_REQUEST, TUNNELING_ACK, CONNECTIONSTATE_RESP, DISCONNECT_RESPONSE,
 )
 
 KNX_IP_PORT = 3671
@@ -124,6 +124,8 @@ class EnduranceTun(TunClient):
                 self.ack_evt.set()
             elif svc == CONNECTIONSTATE_RESP:
                 self.connstate_resp_count += 1
+            elif svc == DISCONNECT_RESPONSE:
+                self.note_disconnect_response(data)
 
     def send_wait(self, cemi, timeout):
         seq = self.tx_seq
