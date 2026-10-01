@@ -11,7 +11,8 @@ Coverage (per device, 13 checks):
   4.  progmode_toggle         /api/progmode flips, reflected in /api/status
   5.  ota_query               /api/update/{check,status} JSON shape
   6.  tunnel_pool_full        open KNX_TUNNELING tunnels, 11th must reject
-  7.  tunnel_pool_written     pool written through device management
+  7.  tunnel_pool_written     pool written through device management;
+                              the original is restored and read back
   8.  disconnect_burst        all tunnels closed back to back, none left open
   9.  source_validation       KNXnet/IP §4.4 source rewrite (v1.4.0)
   10. cemi_response_routing   M_PropRead via tunnel A — B must NOT see it
@@ -256,33 +257,58 @@ def devmgmt_prop(c: "DevMgmtClient", msg_req: int, msg_con: int, obj: int, pid: 
     return None
 
 
-@timed
-def t_tunnel_pool_written(dev: Device):
-    # A pool written through device management with a gap at the start, the
-    # line's x.y.0 and empty entries: tunnels get the usable addresses wherever
-    # they stand, then E_NO_MORE_UNIQUE_CONNECTIONS (0x25), and a device
-    # management connection still connects because it takes no address
-    # (08_TSSH 5.3.1/5.3.2, upstream ce26d6e). The original pool is written back.
-    own = ia_to_int(dev.status.get("knx_pa", "15.15.0"))
-    line = own & 0xFF00
-    usable = [line | d for d in (243, 244) if (line | d) != own]
-    pool = [0, line] + usable + [0] * (EXPECTED_MAX_TUNNELS - 2 - len(usable))
-    dm = DevMgmtClient(dev.host, "POOL", verbose=False)
+def read_tunnel_pool(c: "DevMgmtClient") -> Optional[bytes]:
+    rd = devmgmt_prop(c, CEMI_M_PROPREAD_REQ, CEMI_M_PROPREAD_CON, OT_IP_PARAMETER,
+                      PID_ADDITIONAL_INDIVIDUAL_ADDRESSES, EXPECTED_MAX_TUNNELS)
+    if rd is None or (rd[5] >> 4) != EXPECTED_MAX_TUNNELS or len(rd) < 7 + 2 * EXPECTED_MAX_TUNNELS:
+        return None
+    return rd[7:7 + 2 * EXPECTED_MAX_TUNNELS]
+
+
+def restore_tunnel_pool(dev: Device, dm: "DevMgmtClient", orig: bytes) -> Optional[str]:
+    # Writes the original pool back unless it is still in place, and reads it
+    # back; None when the device holds it again, otherwise what is wrong. The
+    # case's own connection first, then a fresh one, in case the device dropped
+    # it during the case.
+    held = None
+    error = ""
+    for attempt in range(2):
+        c = dm
+        try:
+            if attempt:
+                c = DevMgmtClient(dev.host, "RESTORE", verbose=False)
+                c.connect()
+            now = read_tunnel_pool(c)
+            held = now if now is not None else held
+            if now == orig:
+                return None
+            devmgmt_prop(c, CEMI_M_PROPWRITE_REQ, CEMI_M_PROPWRITE_CON, OT_IP_PARAMETER,
+                         PID_ADDITIONAL_INDIVIDUAL_ADDRESSES, EXPECTED_MAX_TUNNELS, orig)
+            now = read_tunnel_pool(c)
+            held = now if now is not None else held
+            if now == orig:
+                return None
+        except Exception as e:
+            error = f" ({type(e).__name__}: {e})"
+        finally:
+            if c is not dm:
+                c.disconnect()
+    found = f"last read-back {held.hex()}" if held is not None else "no answer to the read-back"
+    return f"original tunnel pool NOT restored: should be {orig.hex()}, {found}{error}"
+
+
+def tunnel_pool_written_check(dev: Device, dm: "DevMgmtClient", usable: list[int],
+                              pool: list[int]) -> tuple[str, str]:
     clients: list[TunClient] = []
-    orig = None
     try:
-        dm.connect()
-        rd = devmgmt_prop(dm, CEMI_M_PROPREAD_REQ, CEMI_M_PROPREAD_CON, OT_IP_PARAMETER,
-                          PID_ADDITIONAL_INDIVIDUAL_ADDRESSES, EXPECTED_MAX_TUNNELS)
-        if rd is None or (rd[5] >> 4) != EXPECTED_MAX_TUNNELS or len(rd) < 7 + 2 * EXPECTED_MAX_TUNNELS:
-            return "FAIL", f"cannot read the tunnel pool: {rd.hex() if rd else None}"
-        orig = rd[7:7 + 2 * EXPECTED_MAX_TUNNELS]
         con = devmgmt_prop(dm, CEMI_M_PROPWRITE_REQ, CEMI_M_PROPWRITE_CON, OT_IP_PARAMETER,
                            PID_ADDITIONAL_INDIVIDUAL_ADDRESSES, EXPECTED_MAX_TUNNELS,
                            b"".join(struct.pack(">H", a) for a in pool))
-        if con is None or (con[5] >> 4) != EXPECTED_MAX_TUNNELS:
-            orig = None     # nothing was written, nothing to restore
-            return "FAIL", f"pool write refused: {con.hex() if con else None}"
+        if con is None:
+            # The write may still have landed; the restore finds out.
+            return "FAIL", "no confirmation for the pool write"
+        if (con[5] >> 4) != EXPECTED_MAX_TUNNELS:
+            return "FAIL", f"pool write refused: {con.hex()}"
         got = []
         for i in range(len(usable) + 1):
             c = TunClient(dev.host, f"W{i}", verbose=False)
@@ -306,11 +332,47 @@ def t_tunnel_pool_written(dev: Device):
         for c in clients:
             try: c.disconnect()
             except Exception: pass
-        if orig is not None:
-            con = devmgmt_prop(dm, CEMI_M_PROPWRITE_REQ, CEMI_M_PROPWRITE_CON, OT_IP_PARAMETER,
-                               PID_ADDITIONAL_INDIVIDUAL_ADDRESSES, EXPECTED_MAX_TUNNELS, orig)
-            if con is None or (con[5] >> 4) != EXPECTED_MAX_TUNNELS:
-                print(f"  !! original tunnel pool NOT restored ({orig.hex()})")
+
+
+@timed
+def t_tunnel_pool_written(dev: Device):
+    # A pool written through device management with a gap at the start, the
+    # line's x.y.0 and empty entries: tunnels get the usable addresses wherever
+    # they stand, then E_NO_MORE_UNIQUE_CONNECTIONS (0x25), and a device
+    # management connection still connects because it takes no address
+    # (08_TSSH 5.3.1/5.3.2, upstream ce26d6e).
+    # The device persists the pool, so one left with the test pool keeps it
+    # across reboots: the original is written back and read back whatever the
+    # case found — also when the write's confirmation went missing, since the
+    # write may have landed anyway — and a failed restore fails the case.
+    own = ia_to_int(dev.status.get("knx_pa", "15.15.0"))
+    line = own & 0xFF00
+    usable = [line | d for d in (243, 244) if (line | d) != own]
+    pool = [0, line] + usable + [0] * (EXPECTED_MAX_TUNNELS - 2 - len(usable))
+    dm = DevMgmtClient(dev.host, "POOL", verbose=False)
+    try:
+        dm.connect()
+        rd = devmgmt_prop(dm, CEMI_M_PROPREAD_REQ, CEMI_M_PROPREAD_CON, OT_IP_PARAMETER,
+                          PID_ADDITIONAL_INDIVIDUAL_ADDRESSES, EXPECTED_MAX_TUNNELS)
+        if rd is None or (rd[5] >> 4) != EXPECTED_MAX_TUNNELS or len(rd) < 7 + 2 * EXPECTED_MAX_TUNNELS:
+            return "FAIL", f"cannot read the tunnel pool: {rd.hex() if rd else None}"
+        orig = rd[7:7 + 2 * EXPECTED_MAX_TUNNELS]
+        try:
+            status, msg = tunnel_pool_written_check(dev, dm, usable, pool)
+        except Exception as e:
+            status, msg = "FAIL", f"exception: {type(e).__name__}: {e}"
+        except BaseException:
+            # Aborted (Ctrl-C): no result goes back, but the device must not
+            # keep the test pool, so restore before passing the abort on.
+            problem = restore_tunnel_pool(dev, dm, orig)
+            if problem:
+                print(f"  !! {problem}")
+            raise
+        problem = restore_tunnel_pool(dev, dm, orig)
+        if problem:
+            return "FAIL", f"{problem} (case: {status} {msg})"
+        return status, f"{msg}; original pool in place"
+    finally:
         dm.disconnect()
         time.sleep(0.5)
 
