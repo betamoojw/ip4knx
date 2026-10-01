@@ -46,6 +46,15 @@ namespace TPUart
         return true;
     }
 
+    // Takes back the byte added last: a service answer that arrived while a frame
+    // was still waiting for its confirmation.
+    void SearchBuffer::dropLast()
+    {
+        if (!_position) return;
+        _position = _position - 1;
+        if (_timeout > _position) _timeout = _position;
+    }
+
     const char *SearchBuffer::get()
     {
         return _buffer;

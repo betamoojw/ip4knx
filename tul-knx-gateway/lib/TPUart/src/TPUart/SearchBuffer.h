@@ -22,6 +22,7 @@ namespace TPUart
         bool add(const char value);
         void clear();
         bool move(const size_t size);
+        void dropLast();
         const char *get();
         const size_t position();
         const size_t timeout();

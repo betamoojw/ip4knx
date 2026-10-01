@@ -12,6 +12,14 @@ namespace TPUart
     {
     }
 
+    // U_State.ind, the answer to the state request processRequestState() sends
+    // once a second. 0xFF fits the pattern but is ignored, not taken as a state,
+    // by processControlBytes().
+    static inline bool isStateAnswer(const char value)
+    {
+        return (value & U_STATE_MASK) == U_STATE_IND && (uint8_t)value != 0xFF;
+    }
+
     void Receiver::process()
     {
         processTimeout();
@@ -31,6 +39,20 @@ namespace TPUart
 
         if(_state == RX_FRAME_WAIT_ACKN)
         {
+                // The byte that ended the pause may be the awaited L_DATA_CON: after the
+                // echo of an unacknowledged frame it comes some 3.4 ms later (30 bit
+                // times of ack time-out, NCN5130 DS p.36), close to the 4-5 ms that set
+                // the marker. Completing the frame here would drop its confirmation;
+                // processSearchBufferAcknowledge() takes it instead. 0x0B/0x8B cannot
+                // start a frame (an L_Data control field has bit 4 set). The same
+                // goes for a U_State.ind ahead of the confirmation.
+                if (_searchBuffer.position() >= _awaitBytes)
+                {
+                    const char value = _searchBuffer.get(_awaitBytes - 1);
+                    if ((value & L_DATA_CON_MASK) == L_DATA_CON ||
+                        (_searchBuffer.frame().isTransmitted() && isStateAnswer(value)))
+                        return;
+                }
                 _state = RX_FRAME_COMPLETE;
                 processCompleteFrame();
                 return;
@@ -107,6 +129,19 @@ namespace TPUart
 
         const char value = _searchBuffer.get(_awaitBytes - 1);
 
+        // A state request that reaches the transceiver while one of our frames is
+        // on the bus is answered after the frame and before its confirmation:
+        // echo, U_State.ind some 3 ms later, L_DATA_CON 1 ms after that
+        // (measured). Closing the frame on the answer left the confirmation to
+        // processControlBytes(), which drops it, so the tunnel client never got
+        // its L_Data.con. Take the state and keep waiting.
+        if (_searchBuffer.frame().isTransmitted() && isStateAnswer(value))
+        {
+            _dll.receivedState(value);
+            _searchBuffer.dropLast();
+            return;
+        }
+
         bool acknowledge = false;
         if ((value & L_DATA_CON_MASK) == L_DATA_CON)
         {
@@ -114,6 +149,7 @@ namespace TPUart
             {
                 _searchBuffer.frame().setAcknowledge();
             }
+            _searchBuffer.frame().setDataCon();
             acknowledge = true;
             _dll.getTransmitter().finalize();
         }
@@ -170,6 +206,8 @@ namespace TPUart
         if (!sufficientlyBytes()) return;
 
         processSearchBufferAcknowledge();
+        // Still waiting: a state answer was taken ahead of the confirmation.
+        if (_state == RX_FRAME_WAIT_ACKN) return;
         if (_searchBuffer.empty()) return;
 
         if (_searchBuffer.frame().isFrame())

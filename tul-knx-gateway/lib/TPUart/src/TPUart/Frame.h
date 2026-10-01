@@ -272,6 +272,18 @@ namespace TPUart
             _flags |= TP_FRAME_FLAG_TX;
         }
 
+        // The transceiver's L_DATA_CON followed this frame: the result of the last
+        // transmission attempt, not the echo of an earlier one that got no ACK.
+        bool isDataCon()
+        {
+            return _flags & TP_FRAME_FLAG_DATA_CON;
+        }
+
+        void setDataCon()
+        {
+            _flags |= TP_FRAME_FLAG_DATA_CON;
+        }
+
         /*
          * Calculates the size of a CemiFrame. A CemiFrame has 2 additional bytes at the beginning.
          * An additional byte is added to a standard frame, as this still has to be converted into an extendend.
