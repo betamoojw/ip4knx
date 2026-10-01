@@ -166,6 +166,15 @@ bool IpParameterObject::isLegacyTunnelAddresses(uint16_t ownAddress, const uint8
     return true;
 }
 
+bool IpParameterObject::isCurrentTunnelPool(uint16_t ownAddress, const uint8_t* addresses)
+{
+    uint16_t firstEntry = 0;
+    for (int i = 0; i < KNX_TUNNELING && firstEntry == 0; i++)
+        popWord(firstEntry, addresses + i * 2);
+    return firstEntry != 0 && (firstEntry >> 8) == (ownAddress >> 8) &&
+           !isLegacyTunnelAddresses(ownAddress, addresses);
+}
+
 bool IpParameterObject::isUsableTunnelAddress(uint16_t ownAddress, uint16_t address)
 {
     return (address & 0xFF) != 0 && address != ownAddress;

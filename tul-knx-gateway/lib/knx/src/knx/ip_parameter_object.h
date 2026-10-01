@@ -20,6 +20,10 @@ class IpParameterObject : public InterfaceObject
     // True for the pool firmware up to 1.4.29 made instead: .1 to .10 of the
     // device's own line, in that order.
     static bool isLegacyTunnelAddresses(uint16_t ownAddress, const uint8_t* addresses);
+    // True for a written pool that is kept as it is: its first entry that is not
+    // empty lies on the device's line, and it is not the legacy pool. Any other
+    // pool is made anew from the device address.
+    static bool isCurrentTunnelPool(uint16_t ownAddress, const uint8_t* addresses);
     // False for an address that is never handed out for tunnelling, whatever a
     // written pool says: x.y.0, and the device's own address (08_TSSH 5.3.1).
     static bool isUsableTunnelAddress(uint16_t ownAddress, uint16_t address);

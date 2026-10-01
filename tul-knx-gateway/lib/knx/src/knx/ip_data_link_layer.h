@@ -4,6 +4,7 @@
 #ifdef USE_IP
 
 #include <stdint.h>
+#include <atomic>
 #include "data_link_layer.h"
 #include "ip_parameter_object.h"
 #include "knx_ip_tunnel_connection.h"
@@ -33,6 +34,9 @@ class IpDataLinkLayer : public DataLinkLayer
     bool isTunnelAddress(uint16_t addr) override;
     bool isConfigChannel(uint8_t channelId) override;
     bool isSentToTunnel(uint16_t address, bool isGrpAddr);
+    // True for a tunnel address the device acknowledges on TP whether a tunnel
+    // holds it or not (see refreshDefendedTunnelAddresses).
+    bool isDefendedTunnelAddress(uint16_t address) const;
     uint8_t getActiveTunnelCount() const;
 #endif
 
@@ -65,6 +69,15 @@ class IpDataLinkLayer : public DataLinkLayer
 #ifdef KNX_TUNNELING
     KnxIpTunnelConnection tunnels[KNX_TUNNELING];
     uint8_t _lastChannelId = 0;
+
+    void refreshDefendedTunnelAddresses();
+    // Two copies, because the TP acknowledge path reads them in the UART task: the
+    // refresh fills the one not in use and then switches over.
+    uint16_t _defendedAddresses[2][KNX_TUNNELING] = {};
+    uint8_t _defendedCount[2] = {0, 0};
+    std::atomic<uint8_t> _defendedSet{0};
+    uint32_t _defendedRefreshMs = 0;
+    bool _defendedRefreshed = false;
 #endif
 };
 #endif

@@ -335,10 +335,86 @@ uint8_t IpDataLinkLayer::getActiveTunnelCount() const
     }
     return count;
 }
+
+// A tunnelling device defends its additional individual addresses and generates
+// layer-2 acknowledges for them (03_08_04 2.2.2). An address nobody acknowledges
+// is free to an address check (03_05_02 2.22.3), so ETS could give one to a new
+// device, which then collides with the tunnel that gets it. Defended are the
+// usable addresses the next connect would hand out: the written pool while it is
+// current, otherwise the default made from the device address. An unprogrammed
+// device (15.15.0) defends none: it has no place in the topology yet, so it
+// claims no addresses in it.
+// Only the acknowledge is given, nothing is transmitted (upstream OpenKNX/knx
+// f745efe). That answers the check by acknowledge (2.22.3) from a management
+// client on another interface of the line; the check over a transport connection
+// (03_05_02 2.19) would also need the T_Disconnect that 03_08_04 2.2.2 asks for,
+// which is not sent. Through this device's own tunnels the defence is not seen at
+// all: the device does not acknowledge its own frames, and a tunnel gets its
+// L_Data.con before the frame is on the line (dataRequestFromTunnel).
+void IpDataLinkLayer::refreshDefendedTunnelAddresses()
+{
+    uint16_t next[KNX_TUNNELING];
+    uint8_t count = 0;
+    if(_deviceObject.individualAddressProgrammed())
+    {
+        const uint16_t ownAddress = _deviceObject.individualAddress();
+        uint16_t propCount = 0;
+        _ipParameters.readPropertyLength(PID_ADDITIONAL_INDIVIDUAL_ADDRESSES, propCount);
+        const uint8_t* addresses = nullptr;
+        if(propCount == KNX_TUNNELING)
+            addresses = _ipParameters.propertyData(PID_ADDITIONAL_INDIVIDUAL_ADDRESSES);
+        uint8_t made[KNX_TUNNELING * 2];
+        if(addresses == nullptr || !IpParameterObject::isCurrentTunnelPool(ownAddress, addresses))
+        {
+            IpParameterObject::defaultTunnelAddresses(ownAddress, made);
+            addresses = made;
+        }
+        for(int i = 0; i < KNX_TUNNELING; i++)
+        {
+            uint16_t pa = 0;
+            popWord(pa, addresses + i*2);
+            if(IpParameterObject::isUsableTunnelAddress(ownAddress, pa))
+                next[count++] = pa;
+        }
+    }
+
+    // Switch only on a change. The copy not in use was switched away from at least
+    // a second ago, so the acknowledge path is long done reading it.
+    const uint8_t current = _defendedSet.load(std::memory_order_relaxed);
+    if(count == _defendedCount[current] &&
+       memcmp(next, _defendedAddresses[current], count * sizeof(uint16_t)) == 0)
+        return;
+    const uint8_t other = current ^ 1;
+    memcpy(_defendedAddresses[other], next, count * sizeof(uint16_t));
+    _defendedCount[other] = count;
+    _defendedSet.store(other, std::memory_order_release);
+}
+
+// Called on the TP acknowledge path, in the UART task: a scan of the copy the
+// refresh prepared, no property access.
+bool IpDataLinkLayer::isDefendedTunnelAddress(uint16_t address) const
+{
+    const uint8_t set = _defendedSet.load(std::memory_order_acquire);
+    for(uint8_t i = 0; i < _defendedCount[set]; i++)
+        if(_defendedAddresses[set][i] == address)
+            return true;
+    return false;
+}
 #endif
 
 void IpDataLinkLayer::loop()
 {
+#ifdef KNX_TUNNELING
+    // Ahead of the enabled check: the addresses are defended on TP while the IP
+    // side is down as well, since tunnels get them once it is up.
+    if(!_defendedRefreshed || millis() - _defendedRefreshMs >= 1000)
+    {
+        _defendedRefreshMs = millis();
+        _defendedRefreshed = true;
+        refreshDefendedTunnelAddresses();
+    }
+#endif
+
     if (!_enabled)
         return;
 
@@ -727,11 +803,7 @@ void IpDataLinkLayer::loopHandleConnectRequest(uint8_t* buffer, uint16_t length,
     // a written pool with a gap at the start is kept; one without any entry is made
     // anew.
     const uint16_t ownAddress = _deviceObject.individualAddress();
-    uint16_t firstEntry = 0;
-    for(int a = 0; addresses != nullptr && a < KNX_TUNNELING && firstEntry == 0; a++)
-        popWord(firstEntry, addresses + a*2);
-    if(addresses != nullptr && (firstEntry == 0 || (firstEntry >> 8) != (ownAddress >> 8) ||
-                                IpParameterObject::isLegacyTunnelAddresses(ownAddress, addresses)))
+    if(addresses != nullptr && !IpParameterObject::isCurrentTunnelPool(ownAddress, addresses))
     {
 #ifdef KNX_LOG_TUNNELING
         println("Tunnel-PAs are outside the device's line or the old default, renewing them");

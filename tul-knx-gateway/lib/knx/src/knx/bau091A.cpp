@@ -225,7 +225,8 @@ TPAckType Bau091A::isAckRequired(uint16_t address, bool isGrpAddr)
                 ack = TPAckType::AckReqNone;
 
 #ifdef KNX_TUNNELING
-        if(_dlLayerPrimary.isSentToTunnel(address, isGrpAddr))
+        // The tunnel addresses as well, held by a tunnel right now or not (03_08_04 2.2.2)
+        if(_dlLayerPrimary.isSentToTunnel(address, isGrpAddr) || _dlLayerPrimary.isDefendedTunnelAddress(address))
             ack = TPAckType::AckReqAck;
 #endif
 
