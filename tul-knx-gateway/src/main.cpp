@@ -1702,6 +1702,7 @@ void setup() {
             json += "\"uart_line_err_unexpected\":" + String(tp.uartUnexpectedLineErrors()) + ",";
             json += "\"acr0_dropped\":" + String(tp.internalRegisterDropped()) + ",";
             json += "\"rx_stack_free\":" + String(tp.rxTaskStackFree()) + ",";
+            json += "\"desync_resets\":" + String(tp.desyncResets()) + ",";
 #ifdef TPUART_CON_DIAG
             {
                 using R = TPUart::Receiver;

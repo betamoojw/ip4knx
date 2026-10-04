@@ -53,6 +53,15 @@
 #define TPUART_REGREAD_TIMEOUT 50
 #endif
 
+// Desync watchdog (processWatchdog): a receiver out of step this long on a
+// connected link gets a reset, at most once per cooldown. (upstream 3ec8f6e)
+#ifndef TPUART_DESYNC_RECOVER_MS
+#define TPUART_DESYNC_RECOVER_MS 20000
+#endif
+#ifndef TPUART_DESYNC_COOLDOWN_MS
+#define TPUART_DESYNC_COOLDOWN_MS 60000
+#endif
+
 // Max KNX TP frame length (extended frame). RX reassembly bounds the per-frame
 // stack buffer against this so a corrupt/desynced length prefix cannot size a
 // huge VLA (stack smash). 263 = 9-byte L_Data_Extended header + 254-byte APDU.
@@ -71,6 +80,11 @@ namespace TPUart
         bool _initialized = false;
         char _repetitions = 0b00110011; // 0-3 Nack (Default 3) // 5-7 Busy (Default 3)
         short _ownAddress = 0;
+        // Desync watchdog (processWatchdog), main loop only: since when the receiver
+        // has been seen out of step, and the resets that bounded it.
+        unsigned long _invalidSince = 0;
+        unsigned long _lastDesyncReset = 0;
+        unsigned int _desyncResets = 0;
 #ifdef TPUART_RESET_IND_TEST_MS
 #ifndef TPUART_RESET_IND_TEST_GAP_MS
 #define TPUART_RESET_IND_TEST_GAP_MS 45000
@@ -241,6 +255,8 @@ namespace TPUart
         // Readings discarded because the line reported an error while they were
         // in flight. Stays at zero on a healthy link.
         unsigned int internalRegisterDropped() const { return _regReadDropped; }
+        // Resets the desync watchdog made since boot; reset() does not clear it.
+        unsigned int desyncResets() const { return _desyncResets; }
 #ifdef TPUART_CON_DIAG
         const Receiver &conDiag() const { return _receiver; }
 #endif

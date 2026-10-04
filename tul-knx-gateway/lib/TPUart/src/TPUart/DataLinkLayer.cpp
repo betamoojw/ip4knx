@@ -440,6 +440,38 @@ namespace TPUart
     {
         if (_bcuState == BCU_UNINITIALIZED) return;
 
+        // A receiver out of step stays _invalid until a frame completes cleanly, and
+        // meanwhile nothing is sent and the state is not polled. A transceiver reset
+        // behind our back - a short loss of bus voltage - in the middle of a frame has
+        // its U_Reset.ind swept away with the rest, so it runs on without the
+        // configuration we believe it has (no CRC-CCITT: every frame fails), and on a
+        // busy line no frame ever completes: deaf and mute until a reboot. Bound it: a
+        // receiver out of step this long on a connected link gets a reset, which
+        // re-syncs and re-applies the configuration. (upstream 3ec8f6e, watchdog part)
+        if (_bcuState != BCU_CONNECTED || !_receiver._invalid)
+        {
+            _invalidSince = 0;
+        }
+        else
+        {
+            const unsigned long now = millis();
+            if (_invalidSince == 0)
+            {
+                _invalidSince = now;
+            }
+            else if (now - _invalidSince >= TPUART_DESYNC_RECOVER_MS &&
+                     (_desyncResets == 0 || now - _lastDesyncReset >= TPUART_DESYNC_COOLDOWN_MS) &&
+                     _receiver._invalid) // read again: the receive task may have cleared it
+            {
+                printError("Receiver out of step for %lus, reset", (now - _invalidSince) / 1000);
+                _lastDesyncReset = now;
+                _invalidSince = 0;
+                _desyncResets++;
+                reset();
+                return;
+            }
+        }
+
         _transmitter.processWatchdog();
     }
 
