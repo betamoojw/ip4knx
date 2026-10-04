@@ -48,6 +48,25 @@ void KnxIpSupportedServiceDIB::setServiceFamilies(bool routing)
 #endif
 }
 
+// 03_08_03 2.5.19 Table 2 p.13: bit 0 device management, bit 1 tunnelling, bit 2 routing.
+// Bits 3 to 6 (remote logging, remote configuration, object server, security) stay clear:
+// none of them is served. Mirrors setServiceFamilies() switch for switch. (upstream 8a8f2d1,
+// which keys routing on KNX_IS_ROUTER; this build announces routing only while it runs)
+uint16_t KnxIpSupportedServiceDIB::deviceCapabilities(bool routing)
+{
+    uint16_t caps = 1 << 0;     // Device Management
+#ifdef KNX_TUNNELING
+    caps |= 1 << 1;             // Tunnelling
+#endif
+#if MASK_VERSION == 0x091A
+    if (routing)
+        caps |= 1 << 2;         // Routing
+#else
+    (void)routing;
+#endif
+    return caps;
+}
+
 void KnxIpSupportedServiceDIB::serviceVersion(ServiceFamily family,  uint8_t version)
 {
     uint8_t* start = _data + 2;

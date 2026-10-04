@@ -45,5 +45,8 @@ class KnxIpSupportedServiceDIB : public KnxIpDIB
     // Length, code and the families this build serves; routing only if announced.
     // Expects the DIB area zeroed, as KnxIpFrame leaves it.
     void setServiceFamilies(bool routing);
+    // PID_KNXNETIP_DEVICE_CAPABILITIES for the same families and the same routing
+    // condition as setServiceFamilies(), so the property and the DIB cannot disagree.
+    static uint16_t deviceCapabilities(bool routing);
 };
 #endif

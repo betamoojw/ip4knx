@@ -5,6 +5,7 @@
 #include "bits.h"
 #include "data_property.h"
 #include "callback_property.h"
+#include "knx_ip_supported_service_dib.h"
 
 // 224.0.23.12
 #define DEFAULT_MULTICAST_ADDR ((uint32_t)0xE000170C)
@@ -122,10 +123,24 @@ IpParameterObject::IpParameterObject(DeviceObject& deviceObject, Platform& platf
                     return 1;
                 }
 
-                pushWord(0x1, data);
+                // Was a fixed 0x0001, which denied tunnelling and routing. Same families and the
+                // same routing condition as the service families DIB. (upstream 8a8f2d1)
+                pushWord(KnxIpSupportedServiceDIB::deviceCapabilities(io->_deviceObject.individualAddressProgrammed()), data);
                 return 1;
             }),
-        new DataProperty(PID_FRIENDLY_NAME, true, PDT_UNSIGNED_CHAR, 30, ReadLv3 | WriteLv3)
+        new DataProperty(PID_FRIENDLY_NAME, true, PDT_UNSIGNED_CHAR, 30, ReadLv3 | WriteLv3),
+#if MASK_VERSION == 0x091A
+        // Router only (upstream 8a8f2d1). Appended so the index of every existing property stays,
+        // and read-only so neither enters the persisted image or InterfaceObject::layoutTag().
+        // 03_08_03 2.5.21 p.14, "shall be implemented by devices providing KNXnet/IP Routing":
+        // 0x00 - none of the optional features is implemented here (no PID 72/73 queue overflow
+        // or PID 74/75 transmit counters, no priority/FIFO). Upstream reports bit 0, it counts
+        // queue overflows.
+        new DataProperty(PID_KNXNETIP_ROUTING_CAPABILITIES, false, PDT_UNSIGNED_CHAR, 1, ReadLv3 | WriteLv0, (uint8_t)0x00),
+        // 03_08_03 2.5.28 p.16, mandatory for any KNXnet/IP or KNX IP device (built here for the router
+        // only), default 100 ms (range 20-100). A parameter, not a claim: ROUTING_BUSY is never sent.
+        new DataProperty(PID_ROUTING_BUSY_WAIT_TIME, false, PDT_UNSIGNED_INT, 1, ReadLv3 | WriteLv0, (uint16_t)100),
+#endif
     };
     initializeProperties(sizeof(properties), properties);
 
