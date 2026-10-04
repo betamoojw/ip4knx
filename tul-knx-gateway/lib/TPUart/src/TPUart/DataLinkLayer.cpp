@@ -136,11 +136,12 @@ namespace TPUart
         {
             rxLock(true);
             // Reassemble the length prefix written by pushRxFrameBuffer() as
-            // (frameSize + 3). char is SIGNED on RISC-V (no -funsigned-char), so
-            // a low byte >= 0x80 (any frame >= ~125 bytes, e.g. an ETS memory
-            // write) would sign-extend and inflate bufferSize to ~0xFFxx. Cast
-            // each byte through uint8_t and read them in a fixed order (the two
-            // pop() calls had unspecified evaluation order before C++17).
+            // (frameSize + 3). Whether char is signed depends on the target (it is
+            // unsigned on the RISC-V parts built here); where it is signed, a low
+            // byte >= 0x80 (any frame >= ~125 bytes, e.g. an ETS memory write)
+            // would sign-extend and inflate bufferSize to ~0xFFxx. Cast each byte
+            // through uint8_t and read them in a fixed order (the two pop() calls
+            // had unspecified evaluation order before C++17).
             const uint8_t lenLo = (uint8_t)_rxFrameBuffer.pop();
             const uint8_t lenHi = (uint8_t)_rxFrameBuffer.pop();
             const uint16_t bufferSize = (uint16_t)lenLo | ((uint16_t)lenHi << 8);
@@ -165,11 +166,30 @@ namespace TPUart
             for (size_t i = 0; i < frameSize; i++)
                 frameData[i] = _rxFrameBuffer.pop();
 
-            Frame frame(frameData, frameSize);
+            // Read in place: frameData lives until the end of this iteration, and
+            // the callbacks below are synchronous and copy what they keep
+            // (processRxFrame takes cemiData()). The copy made here before
+            // allocated per frame and, when that failed under heap pressure, left
+            // a frame without data for the repetition filter to read through.
+            Frame frame(frameData);
 
             frame.addFlags(_rxFrameBuffer.pop());
             asm volatile("" ::: "memory");
             _rxFrameBufferEntries = _rxFrameBufferEntries - 1;
+
+            // pushRxFrameBuffer() records frame.size() of the very bytes it stores,
+            // so for every entry it wrote the two agree. A frame whose header now
+            // claims another length was not written that way: the ring is out of
+            // step, as for an implausible size above.
+            if (frame.size() != frameSize)
+            {
+                _rxFrameBuffer.clear();
+                _rxFrameBufferEntries = 0;
+                asm volatile("" ::: "memory");
+                rxUnlock();
+                _statistics.incrementRxFrameBufferOverflow();
+                break;
+            }
             rxUnlock();
 
             run++;
