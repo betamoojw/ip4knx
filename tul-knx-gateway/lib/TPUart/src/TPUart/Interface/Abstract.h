@@ -26,6 +26,9 @@ namespace TPUart
             // this return 0.
             virtual unsigned int parityErrors() { return 0; }
             virtual unsigned int frameErrors() { return 0; }
+            // Free stack of the task that receives for this interface, at its
+            // lowest since the task started. 0 when there is no such task.
+            virtual unsigned int taskStackFree() { return 0; }
             virtual bool hasCallback() { return false; }
             virtual void registerCallback(std::function<bool()> callback) {}
         };

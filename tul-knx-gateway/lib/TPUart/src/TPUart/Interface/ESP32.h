@@ -35,6 +35,7 @@ namespace TPUart
             bool overflow() override;
             unsigned int parityErrors() override;
             unsigned int frameErrors() override;
+            unsigned int taskStackFree() override;
             void flush() override;
             bool hasCallback() override;
             void registerCallback(std::function<bool()> callback) override;

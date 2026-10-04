@@ -227,6 +227,9 @@ namespace TPUart
         unsigned int uartParityErrors() { return _interface ? _interface->parityErrors() : 0; }
         unsigned int uartFrameErrors() { return _interface ? _interface->frameErrors() : 0; }
         unsigned int uartLineErrors() { return uartParityErrors() + uartFrameErrors(); }
+        // Headroom of the receive task: everything the transceiver sends is
+        // parsed there, so this is the margin the parser leaves.
+        unsigned int rxTaskStackFree() { return _interface ? _interface->taskStackFree() : 0; }
         // Line errors beyond the one each register answer produces by itself.
         // This is the number that says something about the link.
         unsigned int uartUnexpectedLineErrors()

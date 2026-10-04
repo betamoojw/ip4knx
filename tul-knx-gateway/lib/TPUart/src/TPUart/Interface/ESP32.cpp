@@ -168,6 +168,12 @@ namespace TPUart
             return _parityErrors;
         }
 
+        // In bytes: ESP-IDF counts task stacks in bytes, not words.
+        unsigned int ESP32::taskStackFree()
+        {
+            return _taskHandle ? (unsigned int)uxTaskGetStackHighWaterMark(_taskHandle) : 0;
+        }
+
         unsigned int ESP32::frameErrors()
         {
             return _frameErrors;
