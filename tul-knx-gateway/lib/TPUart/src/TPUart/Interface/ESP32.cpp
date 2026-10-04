@@ -113,8 +113,13 @@ namespace TPUart
             uart_driver_delete(_uart);
             if (_taskHandle != nullptr)
             {
-                vTaskDelete(_taskHandle);
+                // Forget the task before deleting it: taskStackFree() reads the
+                // handle from the web server's task, which outranks this one. On
+                // these single-core parts it then either sees nullptr or finishes
+                // with a live task before the deletion can run.
+                TaskHandle_t task = _taskHandle;
                 _taskHandle = nullptr;
+                vTaskDelete(task);
             }
         }
 
