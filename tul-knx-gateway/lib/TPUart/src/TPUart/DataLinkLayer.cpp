@@ -494,8 +494,13 @@ namespace TPUart
 
         // Deferred half of upstream 18d8655: the transceiver reset invalidated
         // whatever we had in flight, so drop it before the next frame is picked.
-        // Main-loop context, so this is safe against processQueue().
+        // Main-loop context, so this is safe against processQueue(). Under rxLock,
+        // in the order reset() takes the two: the receive task matches echoes
+        // against the frame in flight while it holds rxLock, and Transmitter::reset()
+        // frees that frame before it leaves TX_AWAIT.
+        rxLock(true);
         _transmitter.reset();
+        rxUnlock();
 
         applyConfiguration();
         requestState();
