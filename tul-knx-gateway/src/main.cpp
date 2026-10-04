@@ -1752,6 +1752,8 @@ void setup() {
             json += "\"uart_frame_err\":0,";
             json += "\"uart_line_err_unexpected\":0,";
             json += "\"acr0_dropped\":0,";
+            json += "\"rx_stack_free\":0,";
+            json += "\"desync_resets\":0,";
             json += "\"acr0\":" + acr0StatusJson(0) + "}";
         }
 
