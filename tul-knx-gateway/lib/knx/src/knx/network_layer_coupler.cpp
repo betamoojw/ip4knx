@@ -357,7 +357,7 @@ void NetworkLayerCoupler::routeDataIndividual(AckType ack, uint16_t destination,
     {
         // FORWARD_LOCALLY
         //println("NetworkLayerCoupler::routeDataIndividual locally");
-        HopCountType hopType = npdu.hopCount() == 7 ? UnlimitedRouting : NetworkLayerParameter;
+        HopCountType hopType = KNX_ANSWER_HOPTYPE(npdu);
         _transportLayer.dataIndividualIndication(destination, hopType, priority, source, npdu.tpdu());
         return;
     }
@@ -458,7 +458,7 @@ void NetworkLayerCoupler::dataIndication(AckType ack, AddressType addrType, uint
 void NetworkLayerCoupler::dataConfirm(AckType ack, AddressType addrType, uint16_t destination, FrameFormat format, Priority priority, uint16_t source, NPDU& npdu, bool status, uint8_t srcIfIdx)
 {
     //println("NetworkLayerCoupler::dataConfirm");
-    HopCountType hopType = npdu.hopCount() == 7 ? UnlimitedRouting : NetworkLayerParameter;
+    HopCountType hopType = KNX_ANSWER_HOPTYPE(npdu);
 
     // Check if received frame is an echo from our sent frame, we are a normal device in this case
     if (source == _deviceObj.individualAddress())
@@ -478,7 +478,7 @@ void NetworkLayerCoupler::broadcastIndication(AckType ack, FrameFormat format, N
 {
     // Send it to our local stack first
     {
-        HopCountType hopType = npdu.hopCount() == 7 ? UnlimitedRouting : NetworkLayerParameter;
+        HopCountType hopType = KNX_ANSWER_HOPTYPE(npdu);
         DptMedium mediumType = _netLayerEntities[srcIfIdx].mediumType();
 
         // for closed media like TP1 and IP
@@ -517,7 +517,7 @@ void NetworkLayerCoupler::broadcastIndication(AckType ack, FrameFormat format, N
 
 void NetworkLayerCoupler::broadcastConfirm(AckType ack, FrameFormat format, Priority priority, uint16_t source, NPDU& npdu, bool status, uint8_t srcIfIdx)
 {
-    HopCountType hopType = npdu.hopCount() == 7 ? UnlimitedRouting : NetworkLayerParameter;
+    HopCountType hopType = KNX_ANSWER_HOPTYPE(npdu);
 
     // Check if received frame is an echo from our sent frame, we are a normal device in this case
     if (source == _deviceObj.individualAddress())
@@ -531,7 +531,7 @@ void NetworkLayerCoupler::systemBroadcastIndication(AckType ack, FrameFormat for
 {
     // Send it to our local stack first
     {
-        HopCountType hopType = npdu.hopCount() == 7 ? UnlimitedRouting : NetworkLayerParameter;
+        HopCountType hopType = KNX_ANSWER_HOPTYPE(npdu);
         _transportLayer.dataSystemBroadcastIndication(hopType, priority, source, npdu.tpdu());
     }
     
@@ -554,7 +554,7 @@ void NetworkLayerCoupler::systemBroadcastConfirm(AckType ack, FrameFormat format
     // Check if received frame is an echo from our sent frame, we are a normal device in this case
     if (source == _deviceObj.individualAddress())
     {
-        HopCountType hopType = npdu.hopCount() == 7 ? UnlimitedRouting : NetworkLayerParameter;
+        HopCountType hopType = KNX_ANSWER_HOPTYPE(npdu);
         _transportLayer.dataSystemBroadcastConfirm(ack, hopType, npdu.tpdu(), priority, status);
     }
     // Do not process the frame any further
