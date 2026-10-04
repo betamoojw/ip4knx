@@ -3,8 +3,11 @@
 
 #include "driver/uart.h"
 
+// Bytes. The receive task runs the whole parser (Receiver::processSearchBuffer
+// recurses) and the callbacks it makes. Parsing used about 500 of 2048; the
+// first message logged from there (a 1 KB buffer) overran it. (upstream 8ccf6f6)
 #ifndef TPUART_ESP32_TASK_STACK_SIZE
-#define TPUART_ESP32_TASK_STACK_SIZE 2048
+#define TPUART_ESP32_TASK_STACK_SIZE 4096
 #endif
 
 namespace TPUart

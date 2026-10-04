@@ -492,6 +492,11 @@ namespace TPUart
         printMessage("Reset received");
         _uReset = false;
 
+        // The link is up again. Set here and not in receivedReset(), which runs in
+        // the receive task: leaving DISCONNECTED logs, and the 1 KB message buffer
+        // overran that task's stack (reproduced, core dump in printMessage).
+        setBCUState(BCU_CONNECTED);
+
         // Deferred half of upstream 18d8655: the transceiver reset invalidated
         // whatever we had in flight, so drop it before the next frame is picked.
         // Main-loop context, so this is safe against processQueue(). Under rxLock,
@@ -1130,8 +1135,8 @@ namespace TPUart
         // _queue/_frame from the main loop WITHOUT taking txLock — clearing the
         // queue from here would race it into a use-after-free. The reset is
         // therefore deferred to handleReset(), which the main loop runs from
-        // process() before the next processQueue().
-        setBCUState(BCU_CONNECTED);
+        // process() before the next processQueue() - and so is the move to
+        // BCU_CONNECTED, which logs.
     }
 
     void DataLinkLayer::receivedConfiguration(char config)
