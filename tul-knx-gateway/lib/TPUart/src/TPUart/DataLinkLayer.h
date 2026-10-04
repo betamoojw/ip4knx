@@ -71,6 +71,15 @@ namespace TPUart
         bool _initialized = false;
         char _repetitions = 0b00110011; // 0-3 Nack (Default 3) // 5-7 Busy (Default 3)
         short _ownAddress = 0;
+#ifdef TPUART_RESET_IND_TEST_MS
+#ifndef TPUART_RESET_IND_TEST_GAP_MS
+#define TPUART_RESET_IND_TEST_GAP_MS 45000
+#endif
+#ifndef TPUART_RESET_IND_TEST_FIRST_STEP
+#define TPUART_RESET_IND_TEST_FIRST_STEP 0 // 1 skips the disconnected case
+#endif
+        uint8_t _resetIndTestStep = TPUART_RESET_IND_TEST_FIRST_STEP;
+#endif
         volatile bool _uReset = false;
         volatile char _uState = 0;
         volatile bool _modeAutoAcknowlage = false;

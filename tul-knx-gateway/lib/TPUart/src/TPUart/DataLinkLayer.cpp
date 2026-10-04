@@ -357,6 +357,36 @@ namespace TPUart
             }
         }
 
+#ifdef TPUART_RESET_IND_TEST_MS
+        // Bench only, never in a delivered build. Twice, at these uptimes, the
+        // transceiver is reset behind the stack's back, the way a short loss of
+        // bus voltage resets it:
+        //   first (TPUART_RESET_IND_TEST_MS): the link is DISCONNECTED when the
+        //     U_Reset.ind arrives, as after a bus that was away for over 30 s;
+        //   then (+ TPUART_RESET_IND_TEST_GAP_MS): the receiver is out of step
+        //     when it arrives, as after a bus that dropped in the middle of a
+        //     frame, so the indication is swallowed and the transceiver runs on
+        //     without the configuration the stack believes it has.
+        if (_resetIndTestStep < 2 && _bcuState == BCU_CONNECTED &&
+            millis() >= TPUART_RESET_IND_TEST_MS + (_resetIndTestStep ? TPUART_RESET_IND_TEST_GAP_MS : 0))
+        {
+            const bool swallowed = _resetIndTestStep == 1;
+            _resetIndTestStep++;
+            printMessage("Bench: transceiver reset behind the stack, %s", swallowed ? "receiver out of step" : "link disconnected");
+            if (swallowed)
+            {
+                rxLock(true);
+                _receiver._invalid = true;
+                rxUnlock();
+            }
+            else
+                setBCUState(BCU_DISCONNECTED);
+            txLock(true);
+            _interface->write(U_RESET_REQ);
+            txUnlock();
+        }
+#endif
+
         exitBusyModeTimer();
         processRequestState();
 
