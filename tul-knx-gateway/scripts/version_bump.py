@@ -54,11 +54,12 @@ def _atomic_write_text(path, text):
         f.flush()
         os.fsync(f.fileno())
     os.replace(tmp, path)
-    dfd = os.open(str(path.parent) or ".", os.O_RDONLY)
-    try:
-        os.fsync(dfd)
-    finally:
-        os.close(dfd)
+    if os.name != "nt":
+        dfd = os.open(str(path.parent) or ".", os.O_RDONLY)
+        try:
+            os.fsync(dfd)
+        finally:
+            os.close(dfd)
 
 
 git_root_p = git("rev-parse", "--show-toplevel", cwd=PROJECT_DIR)
